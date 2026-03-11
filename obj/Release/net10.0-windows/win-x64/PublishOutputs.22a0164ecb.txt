@@ -1,0 +1,2 @@
+D:\HomeworkViewer\bin\Release\net10.0-windows\win-x64\publish\HomeworkViewer.pdb
+D:\HomeworkViewer\bin\Release\net10.0-windows\win-x64\publish\HomeworkViewer.exe

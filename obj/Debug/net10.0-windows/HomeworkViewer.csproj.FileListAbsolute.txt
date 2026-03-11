@@ -1,0 +1,17 @@
+D:\HomeworkViewer\obj\Debug\net10.0-windows\HomeworkViewer.EditDialog.resources
+D:\HomeworkViewer\obj\Debug\net10.0-windows\HomeworkViewer.HomeworkViewer.resources
+D:\HomeworkViewer\obj\Debug\net10.0-windows\HomeworkViewer.csproj.GenerateResource.cache
+D:\HomeworkViewer\obj\Debug\net10.0-windows\HomeworkViewer.GeneratedMSBuildEditorConfig.editorconfig
+D:\HomeworkViewer\obj\Debug\net10.0-windows\HomeworkViewer.AssemblyInfoInputs.cache
+D:\HomeworkViewer\obj\Debug\net10.0-windows\HomeworkViewer.AssemblyInfo.cs
+D:\HomeworkViewer\obj\Debug\net10.0-windows\HomeworkViewer.csproj.CoreCompileInputs.cache
+D:\HomeworkViewer\bin\Debug\net10.0-windows\HomeworkViewer.exe
+D:\HomeworkViewer\bin\Debug\net10.0-windows\HomeworkViewer.deps.json
+D:\HomeworkViewer\bin\Debug\net10.0-windows\HomeworkViewer.runtimeconfig.json
+D:\HomeworkViewer\bin\Debug\net10.0-windows\HomeworkViewer.dll
+D:\HomeworkViewer\bin\Debug\net10.0-windows\HomeworkViewer.pdb
+D:\HomeworkViewer\obj\Debug\net10.0-windows\HomeworkViewer.dll
+D:\HomeworkViewer\obj\Debug\net10.0-windows\refint\HomeworkViewer.dll
+D:\HomeworkViewer\obj\Debug\net10.0-windows\HomeworkViewer.pdb
+D:\HomeworkViewer\obj\Debug\net10.0-windows\HomeworkViewer.genruntimeconfig.cache
+D:\HomeworkViewer\obj\Debug\net10.0-windows\ref\HomeworkViewer.dll
