@@ -1,17 +1,17 @@
 {
   "format": 1,
   "restore": {
-    "D:\\HomeworkViewer\\HomeworkViewer.csproj": {}
+    "D:\\Administrator\\Documents\\GitHub\\HomeworkViewer\\HomeworkViewer.csproj": {}
   },
   "projects": {
-    "D:\\HomeworkViewer\\HomeworkViewer.csproj": {
+    "D:\\Administrator\\Documents\\GitHub\\HomeworkViewer\\HomeworkViewer.csproj": {
       "version": "1.0.0",
       "restore": {
-        "projectUniqueName": "D:\\HomeworkViewer\\HomeworkViewer.csproj",
+        "projectUniqueName": "D:\\Administrator\\Documents\\GitHub\\HomeworkViewer\\HomeworkViewer.csproj",
         "projectName": "HomeworkViewer",
-        "projectPath": "D:\\HomeworkViewer\\HomeworkViewer.csproj",
+        "projectPath": "D:\\Administrator\\Documents\\GitHub\\HomeworkViewer\\HomeworkViewer.csproj",
         "packagesPath": "C:\\Users\\Administrator\\.nuget\\packages\\",
-        "outputPath": "D:\\HomeworkViewer\\obj\\",
+        "outputPath": "D:\\Administrator\\Documents\\GitHub\\HomeworkViewer\\obj\\",
         "projectStyle": "PackageReference",
         "configFilePaths": [
           "C:\\Users\\Administrator\\AppData\\Roaming\\NuGet\\NuGet.Config",

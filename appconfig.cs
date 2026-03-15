@@ -1,4 +1,6 @@
+#nullable disable
 using System;
+using System.Drawing;
 using System.IO;
 using System.Text.Json;
 
@@ -7,6 +9,11 @@ namespace HomeworkViewer
     public class AppConfig
     {
         public string LastMode { get; set; } = "大理";
+        public int FontSizeLevel { get; set; } = 1;
+        public int CardOpacity { get; set; } = 15;
+        public int BackgroundOpacity { get; set; } = 12;
+        public bool FontColorWhite { get; set; } = false;
+        public string BarColor { get; set; } = "255,255,0"; // 默认黄色
 
         private static string GetConfigPath()
         {

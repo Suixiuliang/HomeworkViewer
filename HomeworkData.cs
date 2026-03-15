@@ -9,11 +9,10 @@ namespace HomeworkViewer
     public class HomeworkData
     {
         public Dictionary<string, string> Subjects { get; set; } = new Dictionary<string, string>();
-        public Dictionary<string, string> ClassReps { get; set; } = new Dictionary<string, string>();   // 未使用但保留
-        public Dictionary<string, string> Teachers { get; set; } = new Dictionary<string, string>();    // 未使用但保留
+        public Dictionary<string, string> ClassReps { get; set; } = new Dictionary<string, string>();
+        public Dictionary<string, string> Teachers { get; set; } = new Dictionary<string, string>();
         public Dictionary<string, string> DueTimes { get; set; } = new Dictionary<string, string>();
 
-        // 所有可能的科目（用于兼容）
         public static readonly string[] SubjectNames = { "语文", "数学", "英语", "物理", "化学", "生物", "政治", "历史", "地理" };
 
         public static HomeworkData Load(DateTime date)
