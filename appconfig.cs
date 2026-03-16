@@ -1,11 +1,17 @@
 #nullable disable
 using System;
-using System.Drawing;
+using System.Collections.Generic;
 using System.IO;
 using System.Text.Json;
 
 namespace HomeworkViewer
 {
+    public class EveningClassTime
+    {
+        public string Start { get; set; }
+        public string End { get; set; }
+    }
+
     public class AppConfig
     {
         public string LastMode { get; set; } = "大理";
@@ -13,7 +19,17 @@ namespace HomeworkViewer
         public int CardOpacity { get; set; } = 15;
         public int BackgroundOpacity { get; set; } = 12;
         public bool FontColorWhite { get; set; } = false;
-        public string BarColor { get; set; } = "255,255,0"; // 默认黄色
+        public string BarColor { get; set; } = "255,255,0";
+
+        // 晚修配置
+        public int EveningClassCount { get; set; } = 3;
+        public List<EveningClassTime> EveningClassTimes { get; set; } = new List<EveningClassTime>();
+
+        // 滚动速度 (像素/秒)
+        public int ScrollSpeed { get; set; } = 30;
+
+        // 科代表（全局配置，不随日期变化）
+        public Dictionary<string, string> ClassReps { get; set; } = new Dictionary<string, string>();
 
         private static string GetConfigPath()
         {
@@ -29,14 +45,25 @@ namespace HomeworkViewer
                 try
                 {
                     string json = File.ReadAllText(path);
-                    return JsonSerializer.Deserialize<AppConfig>(json) ?? new AppConfig();
+                    var config = JsonSerializer.Deserialize<AppConfig>(json) ?? new AppConfig();
+                    if (config.EveningClassTimes == null)
+                        config.EveningClassTimes = new List<EveningClassTime>();
+                    while (config.EveningClassTimes.Count < config.EveningClassCount)
+                        config.EveningClassTimes.Add(new EveningClassTime { Start = "19:00", End = "19:50" });
+                    if (config.EveningClassTimes.Count > config.EveningClassCount)
+                        config.EveningClassTimes = config.EveningClassTimes.GetRange(0, config.EveningClassCount);
+                    if (config.ClassReps == null)
+                        config.ClassReps = new Dictionary<string, string>();
+                    return config;
                 }
-                catch
-                {
-                    return new AppConfig();
-                }
+                catch { }
             }
-            return new AppConfig();
+            var defaultConfig = new AppConfig();
+            defaultConfig.EveningClassTimes.Clear();
+            for (int i = 0; i < defaultConfig.EveningClassCount; i++)
+                defaultConfig.EveningClassTimes.Add(new EveningClassTime { Start = "19:00", End = "19:50" });
+            defaultConfig.ClassReps = new Dictionary<string, string>();
+            return defaultConfig;
         }
 
         public void Save()

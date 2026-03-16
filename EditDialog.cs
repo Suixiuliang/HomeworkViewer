@@ -1,9 +1,9 @@
+#nullable disable
 using System;
 using System.Windows.Forms;
 
 namespace HomeworkViewer
 {
-    // 此文件已不再使用，因为改为内联编辑。保留仅作参考。
     public class EditDialog : Form
     {
         private TextBox textBox;
