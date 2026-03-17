@@ -1,1 +1,1 @@
-{"Version":"1.2.0", "Type":"Stable", "Mandatory":1}
+{"Version":"1.2.0","ReleaseType":"Stable","IsMandatory":"1"}
