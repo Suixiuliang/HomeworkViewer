@@ -1,1 +1,1 @@
-{"1.2.0", "Stable", "1")
+{"Version":"1.2.0", "Type":"Stable", "Mandatory":1}
