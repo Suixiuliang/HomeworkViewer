@@ -13,7 +13,7 @@ namespace HomeworkViewer
         public Dictionary<string, string> Teachers { get; set; } = new Dictionary<string, string>();
         public Dictionary<string, string> DueTimes { get; set; } = new Dictionary<string, string>();
         
-        // 新增：未交名单，科目 -> 名单文本
+        // 未交名单，科目 -> 名单文本
         public Dictionary<string, string> Unsubmitted { get; set; } = new Dictionary<string, string>();
 
         public static readonly string[] SubjectNames = { "语文", "数学", "英语", "物理", "化学", "生物", "政治", "历史", "地理" };

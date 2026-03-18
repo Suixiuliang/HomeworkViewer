@@ -15,11 +15,11 @@ namespace HomeworkViewer
     {
         // 常量
         private readonly Size VIRTUAL_SIZE = new Size(1200, 675);
-        private readonly Size BTN_SIZE = new Size(60, 20);
-        private readonly Point FULLSCREEN_BTN_POS = new Point(1200 - 60 - 10, 13);
-        private readonly Point HISTORY_BTN_POS = new Point(1200 - 60 - 10 - 60 - 10, 13);
-        private readonly Point EDIT_BTN_POS = new Point(1200 - 60 - 10 - 60 - 10 - 60 - 10, 13);
-        private readonly Point ROTATE_BTN_POS = new Point(1200 - 60 - 10 - 60 - 10 - 60 - 10 - 60 - 10, 13);
+        private const int BTN_SQUARE_SIZE = 46; // 正方形按钮边长
+        private readonly Point FULLSCREEN_BTN_POS = new Point(1200 - BTN_SQUARE_SIZE - 10, 13);
+        private readonly Point HISTORY_BTN_POS = new Point(1200 - BTN_SQUARE_SIZE - 10 - BTN_SQUARE_SIZE - 10, 13);
+        private readonly Point EDIT_BTN_POS = new Point(1200 - BTN_SQUARE_SIZE - 10 - BTN_SQUARE_SIZE - 10 - BTN_SQUARE_SIZE - 10, 13);
+        private readonly Point ROTATE_BTN_POS = new Point(1200 - BTN_SQUARE_SIZE - 10 - BTN_SQUARE_SIZE - 10 - BTN_SQUARE_SIZE - 10 - BTN_SQUARE_SIZE - 10, 13);
         private Point SETTINGS_BTN_POS;
         private readonly Point UNSUBMITTED_BTN_POS;
         private readonly Rectangle GRID_AREA = new Rectangle(0, 47, 1200, 631);
@@ -83,6 +83,7 @@ namespace HomeworkViewer
 
         // 图片资源
         private Image buttonImage, historyBtnImage, backBtnImage, leftArrowImage, rightArrowImage;
+        private Dictionary<string, Image> buttonIcons = new Dictionary<string, Image>(); // 图标字典
 
         // 配置
         private AppConfig appConfig;
@@ -139,12 +140,12 @@ namespace HomeworkViewer
         private const int SCROLL_PAUSE_SECONDS = 3;
 
         // 未交名单每页显示行数
-        private const int UNSUBMITTED_ROWS_PER_PAGE = 3; // 改为每页3科
+        private const int UNSUBMITTED_ROWS_PER_PAGE = 3;
 
         public HomeworkViewer()
         {
-            SETTINGS_BTN_POS = new Point(ROTATE_BTN_POS.X - 60 - 10, 13);
-            UNSUBMITTED_BTN_POS = new Point(ROTATE_BTN_POS.X - 60 - 10 - 60 - 10, 13);
+            SETTINGS_BTN_POS = new Point(ROTATE_BTN_POS.X - BTN_SQUARE_SIZE - 10, 13);
+            UNSUBMITTED_BTN_POS = new Point(ROTATE_BTN_POS.X - BTN_SQUARE_SIZE - 10 - BTN_SQUARE_SIZE - 10, 13);
 
             Text = "作业展板";
             ClientSize = VIRTUAL_SIZE;
@@ -314,6 +315,9 @@ namespace HomeworkViewer
         // ---------- 滚动 ----------
         private void ScrollTimer_Tick(object sender, EventArgs e)
         {
+            // 编辑模式下不进行任何滚动更新
+            if (editMode) return;
+
             bool needRedraw = false;
             float speed = appConfig.ScrollSpeed * 0.05f;
             float epsilon = 0.01f;
@@ -326,8 +330,7 @@ namespace HomeworkViewer
             }
             else if (unsubmittedMode)
             {
-                // 未交名单模式：不处理滚动，保持静态
-                // 不添加任何索引
+                // 未交名单模式不滚动
             }
             else
             {
@@ -343,7 +346,7 @@ namespace HomeworkViewer
 
                 Rectangle textArea = GetContentArea(i);
                 float contentHeight = MeasureTextHeight(content, font30, textArea.Width);
-                if (contentHeight <= textArea.Height) continue;
+                if (contentHeight <= textArea.Height) continue; // 内容无需滚动
 
                 if (!scrollOffsets.ContainsKey(i)) scrollOffsets[i] = 0f;
                 if (!scrollPaused.ContainsKey(i)) scrollPaused[i] = false;
@@ -355,31 +358,38 @@ namespace HomeworkViewer
                 {
                     if ((DateTime.Now - pauseStartTime[i]).TotalSeconds >= SCROLL_PAUSE_SECONDS)
                     {
-                        if (scrollOffsets[i] >= contentHeight - textArea.Height - epsilon) // 底部暂停
+                        if (scrollOffsets[i] >= contentHeight - textArea.Height - epsilon) // 在底部暂停
                         {
+                            // 重置到顶部，并进入顶部暂停
                             scrollOffsets[i] = 0f;
                             pauseStartTime[i] = DateTime.Now;
+                            // scrollPaused[i] 保持 true
                         }
-                        else // 顶部暂停
+                        else // 在顶部暂停
                         {
                             scrollPaused[i] = false;
+                            // 给予一个微小偏移量，使其脱离顶部暂停条件
                             scrollOffsets[i] = speed;
                         }
                     }
                 }
                 else
                 {
-                    if (scrollOffsets[i] <= epsilon) // 刚到顶部
+                    // 未暂停，检查是否已在顶部（可能刚重置或刚解除暂停后被设为了speed）
+                    if (scrollOffsets[i] <= epsilon) // 在顶部
                     {
+                        // 进入顶部暂停
                         scrollPaused[i] = true;
                         pauseStartTime[i] = DateTime.Now;
+                        // 注意：此时scrollOffsets仍为0或接近0
                     }
                     else
                     {
+                        // 向下滚动
                         scrollOffsets[i] += speed;
                         if (scrollOffsets[i] >= contentHeight - textArea.Height - epsilon)
                         {
-                            scrollOffsets[i] = contentHeight - textArea.Height;
+                            scrollOffsets[i] = contentHeight - textArea.Height; // 精确到底
                             scrollPaused[i] = true;
                             pauseStartTime[i] = DateTime.Now;
                         }
@@ -427,16 +437,26 @@ namespace HomeworkViewer
                     editMode = value;
                     if (editMode)
                     {
+                        // 进入编辑模式
                         if (!unsubmittedMode)
                         {
                             CreateTimeComboBoxes();
                         }
+                        // 重置滚动状态，使内容显示顶部
+                        scrollOffsets.Clear();
+                        scrollPaused.Clear();
+                        pauseStartTime.Clear();
                     }
                     else
                     {
+                        // 退出编辑模式
                         DestroyTimeComboBoxes();
                         if (editingSubjectIndex != -1)
                             FinishInlineEdit();
+                        // 重置滚动状态，重新开始
+                        scrollOffsets.Clear();
+                        scrollPaused.Clear();
+                        pauseStartTime.Clear();
                     }
                     Invalidate();
                 }
@@ -901,9 +921,8 @@ namespace HomeworkViewer
             {
                 _savedClientSize = this.ClientSize;
                 _savedWindowState = this.WindowState;
-                this.Hide();
-                trayIcon.ShowBalloonTip(1000, "作业展板", "程序已最小化到托盘，点击图标可恢复。", ToolTipIcon.Info);
-                return;
+                // 移除 Hide() 和托盘提示，让窗口正常最小化
+                return; // 直接返回，不执行后续缩放逻辑
             }
 
             if (_resizing || fullscreen || WindowState == FormWindowState.Maximized) return;
@@ -1118,6 +1137,13 @@ namespace HomeworkViewer
                 {
                     RotateManual(1);
                 }
+                else if (fullscreenBtnRect.Contains(x, y))
+                {
+                    // 全屏前先退出编辑模式
+                    if (EditMode)
+                        EditMode = false;
+                    ToggleFullscreen();
+                }
             }
             else if (unsubmittedMode)
             {
@@ -1171,6 +1197,9 @@ namespace HomeworkViewer
                 }
                 else if (fullscreenBtnRect.Contains(x, y))
                 {
+                    // 全屏前先退出编辑模式
+                    if (EditMode)
+                        EditMode = false;
                     ToggleFullscreen();
                 }
                 else if (EditMode)
@@ -1264,6 +1293,9 @@ namespace HomeworkViewer
                 }
                 else if (fullscreenBtnRect.Contains(x, y))
                 {
+                    // 全屏前先退出编辑模式
+                    if (EditMode)
+                        EditMode = false;
                     ToggleFullscreen();
                 }
                 else if (EditMode && !rotationMode && !unsubmittedMode)
@@ -1428,13 +1460,14 @@ namespace HomeworkViewer
         private void LoadImages()
         {
             string imagePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Slide");
-            buttonImage = LoadImage(Path.Combine(imagePath, "按钮.png"), BTN_SIZE);
-            historyBtnImage = LoadImage(Path.Combine(imagePath, "更多.png"), BTN_SIZE);
+            // 原有图片
+            buttonImage = LoadImage(Path.Combine(imagePath, "按钮.png"), new Size(BTN_SQUARE_SIZE, BTN_SQUARE_SIZE));
+            historyBtnImage = LoadImage(Path.Combine(imagePath, "更多.png"), new Size(BTN_SQUARE_SIZE, BTN_SQUARE_SIZE));
 
             Image originalBack = LoadImage(Path.Combine(imagePath, "返回.png"), originalSize: true);
             if (originalBack != null)
             {
-                int targetHeight = 37;
+                int targetHeight = BTN_SQUARE_SIZE;
                 int targetWidth = (int)((float)originalBack.Width / originalBack.Height * targetHeight);
                 backBtnImage = new Bitmap(originalBack, new Size(targetWidth, targetHeight));
             }
@@ -1444,6 +1477,33 @@ namespace HomeworkViewer
             {
                 rightArrowImage = (Image)new Bitmap(leftArrowImage);
                 rightArrowImage.RotateFlip(RotateFlipType.RotateNoneFlipX);
+            }
+
+            // 加载所有按钮图标（高质量缩放）
+            string[] iconNames = { "编辑", "返回", "记录", "轮换", "全屏", "设置", "缩小", "完成", "未交人员" };
+            int iconSize = (int)(BTN_SQUARE_SIZE * 0.6); // 图标占按钮高度的60%，避免重叠
+            foreach (string name in iconNames)
+            {
+                string filePath = Path.Combine(imagePath, name + ".png");
+                if (File.Exists(filePath))
+                {
+                    using (Image img = Image.FromFile(filePath))
+                    {
+                        // 创建目标位图，保留透明度
+                        Bitmap targetBitmap = new Bitmap(iconSize, iconSize, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+                        using (Graphics g = Graphics.FromImage(targetBitmap))
+                        {
+                            // 设置高质量插值模式
+                            g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                            g.SmoothingMode = SmoothingMode.HighQuality;
+                            g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+                            g.CompositingQuality = CompositingQuality.HighQuality;
+                            // 绘制缩放后的图像
+                            g.DrawImage(img, 0, 0, iconSize, iconSize);
+                        }
+                        buttonIcons[name] = targetBitmap;
+                    }
+                }
             }
         }
 
@@ -1607,42 +1667,32 @@ namespace HomeworkViewer
         {
             if (rotationMode || unsubmittedMode)
             {
-                int backY = 13;
-                backBtnRect = new Rectangle(35, backY, BTN_SIZE.Width, BTN_SIZE.Height);
+                // 左上角返回按钮
+                int backY = barRect.Top + (barRect.Height - BTN_SQUARE_SIZE) / 2;
+                backBtnRect = new Rectangle(35, backY, BTN_SQUARE_SIZE, BTN_SQUARE_SIZE);
 
-                Color backColor = _backPressed ? Color.FromArgb(200, 40, 40, 40) : Color.FromArgb(180, 64, 64, 64);
-                using (GraphicsPath path = CreateRoundedRectPath(backBtnRect, ROUND_RADIUS))
-                {
-                    using (SolidBrush btnBrush = new SolidBrush(backColor))
-                    {
-                        g.FillPath(btnBrush, path);
-                    }
-                    using (Pen borderPen = new Pen(Color.FromArgb(100, 255, 255, 255)))
-                    {
-                        g.DrawPath(borderPen, path);
-                    }
-                }
-                g.DrawString("返回", buttonFont, Brushes.White, backBtnRect, CenterStringFormat());
+                DrawTransparentButton(g, backBtnRect, "返回", buttonIcons.ContainsKey("返回") ? buttonIcons["返回"] : null, ref backBtnRect, backBtnRect.Location, _backPressed);
 
-                int btnY = barRect.Top + (barRect.Height - BTN_SIZE.Height) / 2;
-                int totalButtonsWidth = 3 * BTN_SIZE.Width + 2 * 10;
+                // 右上角三个按钮
+                int btnY = barRect.Top + (barRect.Height - BTN_SQUARE_SIZE) / 2;
+                int totalButtonsWidth = 3 * BTN_SQUARE_SIZE + 2 * 10;
                 int startX = barRect.Right - totalButtonsWidth - 20;
 
                 Point editPos = new Point(startX, btnY);
-                Point historyPos = new Point(editPos.X + BTN_SIZE.Width + 10, btnY);
-                Point fullscreenPos = new Point(historyPos.X + BTN_SIZE.Width + 10, btnY);
+                Point historyPos = new Point(editPos.X + BTN_SQUARE_SIZE + 10, btnY);
+                Point fullscreenPos = new Point(historyPos.X + BTN_SQUARE_SIZE + 10, btnY);
 
-                // 未交模式下编辑按钮显示为“登记”/“完成”，普通模式下显示“编辑”/“完成”
-                string editButtonText;
-                if (unsubmittedMode)
-                    editButtonText = editMode ? "完成" : "登记";
-                else
-                    editButtonText = editMode ? "完成" : "编辑";
+                string editButtonText = unsubmittedMode ? (editMode ? "完成" : "登记") : (editMode ? "完成" : "编辑");
+                string editIconKey = editMode ? "完成" : (unsubmittedMode ? "编辑" : "编辑");
+                DrawTransparentButton(g, editBtnRect, editButtonText, buttonIcons.ContainsKey(editIconKey) ? buttonIcons[editIconKey] : null, ref editBtnRect, editPos, _editPressed);
 
-                DrawTransparentButton(g, editBtnRect, editButtonText, ref editBtnRect, editPos, _editPressed);
-                DrawTransparentButton(g, historyBtnRect, historyMode ? "返回" : "记录", ref historyBtnRect, historyPos, _historyPressed);
-                DrawTransparentButton(g, fullscreenBtnRect, fullscreen ? "缩小" : "全屏", ref fullscreenBtnRect, fullscreenPos, _fullscreenPressed);
+                string historyIconKey = historyMode ? "返回" : "记录";
+                DrawTransparentButton(g, historyBtnRect, historyMode ? "返回" : "记录", buttonIcons.ContainsKey(historyIconKey) ? buttonIcons[historyIconKey] : null, ref historyBtnRect, historyPos, _historyPressed);
 
+                string fullscreenIconKey = fullscreen ? "缩小" : "全屏";
+                DrawTransparentButton(g, fullscreenBtnRect, fullscreen ? "缩小" : "全屏", buttonIcons.ContainsKey(fullscreenIconKey) ? buttonIcons[fullscreenIconKey] : null, ref fullscreenBtnRect, fullscreenPos, _fullscreenPressed);
+
+                // 绘制左右箭头（如果分页）
                 if (unsubmittedMode)
                 {
                     int totalPages = (currentSubjects.Length + UNSUBMITTED_ROWS_PER_PAGE - 1) / UNSUBMITTED_ROWS_PER_PAGE;
@@ -1704,42 +1754,50 @@ namespace HomeworkViewer
             }
             else
             {
-                int btnY = barRect.Top + (barRect.Height - BTN_SIZE.Height) / 2;
-                int totalButtonsWidth = 6 * BTN_SIZE.Width + 5 * 10;
+                int btnY = barRect.Top + (barRect.Height - BTN_SQUARE_SIZE) / 2;
+                int totalButtonsWidth = 6 * BTN_SQUARE_SIZE + 5 * 10;
                 int startX = barRect.Right - totalButtonsWidth - 20;
 
                 Point settingsPos = new Point(startX, btnY);
-                Point rotatePos = new Point(settingsPos.X + BTN_SIZE.Width + 10, btnY);
-                Point unsubmittedPos = new Point(rotatePos.X + BTN_SIZE.Width + 10, btnY);
-                Point editPos = new Point(unsubmittedPos.X + BTN_SIZE.Width + 10, btnY);
-                Point historyPos = new Point(editPos.X + BTN_SIZE.Width + 10, btnY);
-                Point fullscreenPos = new Point(historyPos.X + BTN_SIZE.Width + 10, btnY);
+                Point rotatePos = new Point(settingsPos.X + BTN_SQUARE_SIZE + 10, btnY);
+                Point unsubmittedPos = new Point(rotatePos.X + BTN_SQUARE_SIZE + 10, btnY);
+                Point editPos = new Point(unsubmittedPos.X + BTN_SQUARE_SIZE + 10, btnY);
+                Point historyPos = new Point(editPos.X + BTN_SQUARE_SIZE + 10, btnY);
+                Point fullscreenPos = new Point(historyPos.X + BTN_SQUARE_SIZE + 10, btnY);
 
-                DrawTransparentButton(g, settingsBtnRect, "设置", ref settingsBtnRect, settingsPos, _settingsPressed);
-                DrawTransparentButton(g, rotateBtnRect, "轮换", ref rotateBtnRect, rotatePos, _rotatePressed);
-                DrawTransparentButton(g, unsubmittedBtnRect, "未交", ref unsubmittedBtnRect, unsubmittedPos, _unsubmittedPressed);
-                DrawTransparentButton(g, editBtnRect, editMode ? "完成" : "编辑", ref editBtnRect, editPos, _editPressed);
-                DrawTransparentButton(g, historyBtnRect, historyMode ? "返回" : "记录", ref historyBtnRect, historyPos, _historyPressed);
-                DrawTransparentButton(g, fullscreenBtnRect, fullscreen ? "缩小" : "全屏", ref fullscreenBtnRect, fullscreenPos, _fullscreenPressed);
+                DrawTransparentButton(g, settingsBtnRect, "设置", buttonIcons.ContainsKey("设置") ? buttonIcons["设置"] : null, ref settingsBtnRect, settingsPos, _settingsPressed);
+                DrawTransparentButton(g, rotateBtnRect, "轮换", buttonIcons.ContainsKey("轮换") ? buttonIcons["轮换"] : null, ref rotateBtnRect, rotatePos, _rotatePressed);
+                DrawTransparentButton(g, unsubmittedBtnRect, "未交", buttonIcons.ContainsKey("未交人员") ? buttonIcons["未交人员"] : null, ref unsubmittedBtnRect, unsubmittedPos, _unsubmittedPressed);
+                DrawTransparentButton(g, editBtnRect, editMode ? "完成" : "编辑", buttonIcons.ContainsKey(editMode ? "完成" : "编辑") ? buttonIcons[editMode ? "完成" : "编辑"] : null, ref editBtnRect, editPos, _editPressed);
+                DrawTransparentButton(g, historyBtnRect, historyMode ? "返回" : "记录", buttonIcons.ContainsKey(historyMode ? "返回" : "记录") ? buttonIcons[historyMode ? "返回" : "记录"] : null, ref historyBtnRect, historyPos, _historyPressed);
+                DrawTransparentButton(g, fullscreenBtnRect, fullscreen ? "缩小" : "全屏", buttonIcons.ContainsKey(fullscreen ? "缩小" : "全屏") ? buttonIcons[fullscreen ? "缩小" : "全屏"] : null, ref fullscreenBtnRect, fullscreenPos, _fullscreenPressed);
             }
         }
 
-        private void DrawTransparentButton(Graphics g, Rectangle rect, string text, ref Rectangle targetRect, Point pos, bool pressed)
+        private void DrawTransparentButton(Graphics g, Rectangle rect, string text, Image icon, ref Rectangle targetRect, Point pos, bool pressed)
         {
-            targetRect = new Rectangle(pos, BTN_SIZE);
-            Color btnColor = pressed ? Color.FromArgb(200, 40, 40, 40) : Color.FromArgb(180, 64, 64, 64);
-            using (GraphicsPath path = CreateRoundedRectPath(targetRect, ROUND_RADIUS))
+            targetRect = new Rectangle(pos, new Size(BTN_SQUARE_SIZE, BTN_SQUARE_SIZE));
+
+            // 可调参数（可根据需要修改）
+            const int iconTopMargin = 3;      // 图标上边距（像素）
+            const float textBottomMargin = 1; // 文字下边距（像素，原为3，现增加2达到下移效果）
+
+            // 绘制图标
+            if (icon != null)
             {
-                using (SolidBrush btnBrush = new SolidBrush(btnColor))
-                {
-                    g.FillPath(btnBrush, path);
-                }
-                using (Pen borderPen = new Pen(Color.FromArgb(100, 255, 255, 255)))
-                {
-                    g.DrawPath(borderPen, path);
-                }
+                int iconX = targetRect.Left + (targetRect.Width - icon.Width) / 2;
+                int iconY = targetRect.Top + iconTopMargin;
+                g.DrawImage(icon, iconX, iconY, icon.Width, icon.Height);
             }
-            g.DrawString(text, buttonFont, Brushes.White, targetRect, CenterStringFormat());
+
+            // 绘制文字
+            using (Font smallFont = new Font("微软雅黑", 8))
+            {
+                SizeF textSize = g.MeasureString(text, smallFont);
+                float textX = targetRect.Left + (targetRect.Width - textSize.Width) / 2;
+                float textY = targetRect.Bottom - textSize.Height - textBottomMargin;
+                g.DrawString(text, smallFont, Brushes.White, textX, textY);
+            }
         }
 
         private StringFormat CenterStringFormat()
@@ -1755,6 +1813,7 @@ namespace HomeworkViewer
             {
                 Rectangle rect = gridRects[i];
 
+                // 阴影
                 int shadowOffset = 3;
                 Rectangle shadowRect = new Rectangle(rect.X + shadowOffset, rect.Y + shadowOffset, rect.Width, rect.Height);
                 using (GraphicsPath shadowPath = CreateRoundedRectPath(shadowRect, ROUND_RADIUS))
@@ -1765,6 +1824,7 @@ namespace HomeworkViewer
                     }
                 }
 
+                // 卡片主体背景（毛玻璃渐变）
                 int topAlpha = (int)(220 * opacityFactor);
                 int bottomAlpha = (int)(160 * opacityFactor);
                 using (GraphicsPath path = CreateRoundedRectPath(rect, ROUND_RADIUS))
@@ -1784,7 +1844,8 @@ namespace HomeworkViewer
                     bool highlightActive = _activeEvenings.Contains(dueTime);
                     bool highlightFlash = _flashingEvenings.Contains(dueTime);
                     bool highlightGray = _grayEvenings.Contains(dueTime);
-                    Color borderColor = Color.FromArgb(100, 128, 128, 128);
+                    Color borderColor = Color.FromArgb(100, 128, 128, 128); // 默认边框颜色
+                    float borderWidth = 1; // 默认边框宽度
 
                     if (_debugFlashing || highlightFlash)
                     {
@@ -1795,22 +1856,24 @@ namespace HomeworkViewer
                         }
                         DrawLaserBorder(g, path, rect);
                         borderColor = Color.FromArgb(200, 255, 0, 0);
+                        // 闪烁时边框宽度保持1，激光已单独处理
                     }
                     else if (highlightActive)
                     {
-                        using (SolidBrush activeBrush = new SolidBrush(Color.FromArgb(80, SystemColors.Highlight)))
-                        {
-                            g.FillPath(activeBrush, path);
-                        }
+                        // 晚修进行时：不填充任何额外背景，仅边框加粗为2，颜色使用系统高亮色
                         borderColor = SystemColors.Highlight;
+                        borderWidth = 2;
                     }
+                    // highlightGray 等其他情况不处理，保持默认
 
-                    using (Pen borderPen = new Pen(borderColor, 1))
+                    // 绘制卡片边框
+                    using (Pen borderPen = new Pen(borderColor, borderWidth))
                     {
                         g.DrawPath(borderPen, path);
                     }
                 }
 
+                // 绘制科目名称、横线、提交时间、作业内容等（以下代码保持不变）
                 if (i < currentSubjects.Length)
                 {
                     string subject = currentSubjects[i];
@@ -1904,6 +1967,7 @@ namespace HomeworkViewer
                 bool highlightFlash = _flashingEvenings.Contains(dueTime);
                 bool highlightGray = _grayEvenings.Contains(dueTime);
                 Color borderColor = Color.FromArgb(100, 128, 128, 128);
+                float borderWidth = 1;
 
                 if (_debugFlashing || highlightFlash)
                 {
@@ -1917,19 +1981,18 @@ namespace HomeworkViewer
                 }
                 else if (highlightActive)
                 {
-                    using (SolidBrush activeBrush = new SolidBrush(Color.FromArgb(80, SystemColors.Highlight)))
-                    {
-                        g.FillPath(activeBrush, path);
-                    }
+                    // 晚修进行时：不填充额外背景，仅边框加粗为2，颜色使用系统高亮色
                     borderColor = SystemColors.Highlight;
+                    borderWidth = 2;
                 }
 
-                using (Pen borderPen = new Pen(borderColor, 1))
+                using (Pen borderPen = new Pen(borderColor, borderWidth))
                 {
                     g.DrawPath(borderPen, path);
                 }
             }
 
+            // 以下为卡片内部其他内容绘制（保持不变）
             string subject2 = currentSubjects[rotationIndex];
             g.DrawString(subject2, font36, Brushes.White, new PointF(600 - (int)g.MeasureString(subject2, font36).Width / 2, bigRect.Top + 30));
 
@@ -1974,6 +2037,13 @@ namespace HomeworkViewer
 
         private void DrawUnsubmittedView(Graphics g)
         {
+            // 确保字体有效
+            if (font30 == null || fontSmall == null || font22 == null || hintFont == null)
+            {
+                ApplyFontSettings();
+                if (font30 == null) return;
+            }
+
             float opacityFactor = appConfig.CardOpacity / 100f;
             int topAlpha = (int)(220 * opacityFactor);
             int bottomAlpha = (int)(160 * opacityFactor);
@@ -2004,17 +2074,54 @@ namespace HomeworkViewer
                 int rowHeight = (bigRect.Height - 120) / UNSUBMITTED_ROWS_PER_PAGE;
                 int baseY = bigRect.Top + 100;
 
+                // 定义间距常量
+                const int subjectToCountSpacing = 2;   // 科目与人数统计间距
+                const int countToListSpacing = 5;      // 人数统计与名单区域间距
+                const int listVerticalPadding = -300;      // 名单区域上下内边距
+
                 for (int i = startIndex; i < endIndex; i++)
                 {
                     string subject = currentSubjects[i];
                     int rowY = baseY + (i - startIndex) * rowHeight;
 
                     // 绘制科目名称（左对齐）
-                    g.DrawString(subject, font22, new SolidBrush(TEXT_COLOR), new PointF(bigRect.Left + 50, rowY + 5));
+                    float subjectY = rowY + 5;
+                    g.DrawString(subject, font22, new SolidBrush(TEXT_COLOR), new PointF(bigRect.Left + 50, subjectY));
 
-                    // 绘制名单区域
+                    // 计算人数
                     string unsubmittedText = homeworkData.Unsubmitted.ContainsKey(subject) ? homeworkData.Unsubmitted[subject] : "";
-                    Rectangle textRect = new Rectangle(bigRect.Left + 200, rowY, bigRect.Width - 250, rowHeight);
+                    int peopleCount = 0;
+                    if (!string.IsNullOrWhiteSpace(unsubmittedText))
+                    {
+                        string pattern = @"[，,。；;、\s]+";
+                        string[] parts = System.Text.RegularExpressions.Regex.Split(unsubmittedText, pattern);
+                        peopleCount = parts.Count(p => !string.IsNullOrWhiteSpace(p));
+                        if (peopleCount == 0 && !string.IsNullOrWhiteSpace(unsubmittedText))
+                            peopleCount = 1;
+                    }
+
+                    // 绘制人数统计（红色）
+                    string countText = peopleCount.ToString();
+                    string suffixText = "人未交";
+                    float countWidth = g.MeasureString(countText, font30).Width;
+                    float statsX = bigRect.Left + 50;
+                    float statsY = subjectY + font22.Height + subjectToCountSpacing;
+                    g.DrawString(countText, font30, Brushes.Red, statsX, statsY);
+                    g.DrawString(suffixText, fontSmall, Brushes.Red, statsX + countWidth, statsY + font30.Height - fontSmall.Height - 2);
+
+                    // 计算名单区域
+                    float usedHeight = (subjectY - rowY) + font22.Height + subjectToCountSpacing + font30.Height; // 从 rowY 到人数统计底部的高度
+                    float availableForList = rowHeight - usedHeight - countToListSpacing; // 减去人数统计与名单之间的间距
+                    if (availableForList < listVerticalPadding * 2) availableForList = listVerticalPadding * 2; // 保证至少有内边距空间
+
+                    float listAreaHeight = availableForList - listVerticalPadding * 2; // 实际绘制文本的高度
+                    float listAreaTop = rowY + usedHeight + countToListSpacing + listVerticalPadding - 40; // 名单区域顶部
+
+                    RectangleF textRect = new RectangleF(
+                        bigRect.Left + 200,
+                        listAreaTop,
+                        bigRect.Width - 250,
+                        listAreaHeight);
 
                     if (editingSubjectIndex == i && currentEditType == EditFieldType.Unsubmitted)
                     {
@@ -2022,21 +2129,10 @@ namespace HomeworkViewer
                     }
                     else if (!string.IsNullOrWhiteSpace(unsubmittedText))
                     {
-                        // 不滚动，偏移固定为0
-                        float offset = 0f;
-
-                        // 保存状态并设置裁剪区域
+                        // 有名单文字，需要分行并垂直居中
                         GraphicsState state = g.Save();
                         g.SetClip(textRect);
 
-                        // 创建居中对齐的格式
-                        StringFormat sf = new StringFormat
-                        {
-                            Alignment = StringAlignment.Center,
-                            LineAlignment = StringAlignment.Center
-                        };
-
-                        // 逐行绘制（手动处理）
                         List<string> lines = new List<string>();
                         string[] paragraphs = unsubmittedText.Split('\n');
                         foreach (string para in paragraphs)
@@ -2061,10 +2157,15 @@ namespace HomeworkViewer
                         }
 
                         float lineHeight = font30.GetHeight(g);
+                        float totalTextHeight = lines.Count * lineHeight;
+
+                        // 计算垂直偏移，使文本在 textRect 内居中
+                        float verticalOffset = (textRect.Height - totalTextHeight) / 2;
+                        if (verticalOffset < 0) verticalOffset = 0; // 超出时不滚动，显示顶部
+
                         for (int j = 0; j < lines.Count; j++)
                         {
-                            float y = textRect.Top + j * lineHeight - offset;
-                            // 计算每行的居中 x 坐标
+                            float y = textRect.Top + j * lineHeight + verticalOffset;
                             SizeF sz = g.MeasureString(lines[j], font30);
                             float x = textRect.Left + (textRect.Width - sz.Width) / 2;
                             g.DrawString(lines[j], font30, new SolidBrush(TEXT_COLOR), x, y);
@@ -2074,10 +2175,15 @@ namespace HomeworkViewer
                     }
                     else
                     {
+                        // 无名单文字，显示提示，手动居中
                         string hint = editMode ? "点此编辑名单" : "无未交人员";
-                        g.DrawString(hint, hintFont, RED_SEMI, textRect, CenterStringFormat());
+                        SizeF hintSize = g.MeasureString(hint, hintFont);
+                        float hintX = textRect.Left + (textRect.Width - hintSize.Width) / 2;
+                        float hintY = textRect.Top + (textRect.Height - hintSize.Height) / 2;
+                        g.DrawString(hint, hintFont, RED_SEMI, hintX, hintY);
                     }
 
+                    // 绘制行分隔线（最后一行不画）
                     if (i < endIndex - 1)
                         g.DrawLine(Pens.LightGray, bigRect.Left + 50, rowY + rowHeight, bigRect.Right - 50, rowY + rowHeight);
                 }
