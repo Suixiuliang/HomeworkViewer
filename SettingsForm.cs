@@ -17,6 +17,7 @@ namespace HomeworkViewer
         public string Version { get; set; }
         public string ReleaseType { get; set; }
         public string IsMandatory { get; set; }
+        public string Hash { get; set; }
     }
 
     public partial class SettingsForm : Form
@@ -42,6 +43,8 @@ namespace HomeworkViewer
         private Panel pnlBarColorPreview;
         private ColorDialog colorDialog;
 
+        private ComboBox cmbBgEffect;
+
         private NumericUpDown numEveningCount;
         private FlowLayoutPanel eveningPanel;
         private List<DateTimePicker> startPickers = new List<DateTimePicker>();
@@ -58,8 +61,6 @@ namespace HomeworkViewer
         private Label lblUpdateContent;
         private Label lblMirrorStatus;
         private ComboBox cmbMirrorManual;
-
-        // 新增：下载进度控件
         private ProgressBar progressDownload;
         private Label lblDownloadStatus;
 
@@ -95,9 +96,8 @@ namespace HomeworkViewer
         {
             Assembly assembly = Assembly.GetEntryAssembly();
             FileVersionInfo fvi = FileVersionInfo.GetVersionInfo(assembly.Location);
-            string fullVersion = fvi.ProductVersion; // 可能包含 + 和哈希值，如 "1.2.0+4c8b50..."
+            string fullVersion = fvi.ProductVersion;
 
-            // 提取有效的版本号部分（取第一个加号之前的部分）
             string versionPart = fullVersion;
             int plusIndex = fullVersion.IndexOf('+');
             if (plusIndex > 0)
@@ -107,9 +107,9 @@ namespace HomeworkViewer
                 versionPart = fullVersion.Substring(0, spaceIndex);
 
             string[] parts = versionPart.Split('.');
-            if (parts.Length >= 3 && 
-                int.TryParse(parts[0], out int major) && 
-                int.TryParse(parts[1], out int minor) && 
+            if (parts.Length >= 3 &&
+                int.TryParse(parts[0], out int major) &&
+                int.TryParse(parts[1], out int minor) &&
                 int.TryParse(parts[2], out int build))
             {
                 _currentVersion = new Version(major, minor, build);
@@ -125,10 +125,8 @@ namespace HomeworkViewer
         private async Task<RemoteVersionInfo> FetchRemoteVersionInfoAsync()
         {
             string originalUrl = "https://raw.githubusercontent.com/Suixiuliang/HomeworkViewer/refs/heads/main/Version.txt";
-            
-            // 获取镜像URL
             string url = await _mirrorManager.GetMirroredUrlAsync(originalUrl);
-            
+
             using (HttpClient client = new HttpClient())
             {
                 try
@@ -136,39 +134,44 @@ namespace HomeworkViewer
                     client.Timeout = TimeSpan.FromSeconds(5);
                     string json = await client.GetStringAsync(url);
 
-                    // 尝试解析为数组
+                    // 数组格式
                     try
                     {
                         var parts = JsonSerializer.Deserialize<string[]>(json);
-                        if (parts != null && parts.Length == 3)
+                        if (parts != null && parts.Length >= 3)
                         {
-                            return new RemoteVersionInfo
+                            var info = new RemoteVersionInfo
                             {
                                 Version = parts[0],
                                 ReleaseType = parts[1],
                                 IsMandatory = parts[2]
                             };
+                            if (parts.Length >= 4)
+                                info.Hash = parts[3];
+                            return info;
                         }
                     }
                     catch { }
 
-                    // 尝试解析为对象
+                    // 对象格式
                     try
                     {
                         var obj = JsonSerializer.Deserialize<Dictionary<string, string>>(json);
                         if (obj != null && obj.ContainsKey("Version") && obj.ContainsKey("ReleaseType") && obj.ContainsKey("IsMandatory"))
                         {
-                            return new RemoteVersionInfo
+                            var info = new RemoteVersionInfo
                             {
                                 Version = obj["Version"],
                                 ReleaseType = obj["ReleaseType"],
                                 IsMandatory = obj["IsMandatory"]
                             };
+                            if (obj.ContainsKey("Hash"))
+                                info.Hash = obj["Hash"];
+                            return info;
                         }
                     }
                     catch { }
 
-                    // 如果都不成功，显示实际内容
                     if (!this.IsDisposed)
                     {
                         this.Invoke((Action)(() =>
@@ -179,22 +182,23 @@ namespace HomeworkViewer
                 }
                 catch (HttpRequestException ex) when (url != originalUrl)
                 {
-                    // 如果镜像失败，尝试原始URL
                     try
                     {
                         string json = await client.GetStringAsync(originalUrl);
-                        // 再次尝试解析
                         try
                         {
                             var parts = JsonSerializer.Deserialize<string[]>(json);
-                            if (parts != null && parts.Length == 3)
+                            if (parts != null && parts.Length >= 3)
                             {
-                                return new RemoteVersionInfo
+                                var info = new RemoteVersionInfo
                                 {
                                     Version = parts[0],
                                     ReleaseType = parts[1],
                                     IsMandatory = parts[2]
                                 };
+                                if (parts.Length >= 4)
+                                    info.Hash = parts[3];
+                                return info;
                             }
                         }
                         catch { }
@@ -203,12 +207,15 @@ namespace HomeworkViewer
                             var obj = JsonSerializer.Deserialize<Dictionary<string, string>>(json);
                             if (obj != null && obj.ContainsKey("Version") && obj.ContainsKey("ReleaseType") && obj.ContainsKey("IsMandatory"))
                             {
-                                return new RemoteVersionInfo
+                                var info = new RemoteVersionInfo
                                 {
                                     Version = obj["Version"],
                                     ReleaseType = obj["ReleaseType"],
                                     IsMandatory = obj["IsMandatory"]
                                 };
+                                if (obj.ContainsKey("Hash"))
+                                    info.Hash = obj["Hash"];
+                                return info;
                             }
                         }
                         catch { }
@@ -223,7 +230,7 @@ namespace HomeworkViewer
                     catch
                     {
                         if (!this.IsDisposed)
-                            this.Invoke((Action)(() => MessageBox.Show($"网络错误：{ex.Message}\n请检查网络连接或稍后重试。", "检查更新失败", MessageBoxButtons.OK, MessageBoxIcon.Error)));
+                            this.Invoke((Action)(() => MessageBox.Show($"网络错误，请检查网络连接或稍后重试。", "检查更新失败", MessageBoxButtons.OK, MessageBoxIcon.Error)));
                     }
                 }
                 catch (HttpRequestException ex)
@@ -254,13 +261,11 @@ namespace HomeworkViewer
 
             if (this.IsDisposed) return;
 
-            // 保存当前版本引用，避免闭包问题
             Version currentVer = _currentVersion;
             string currentVerStr = _currentVersionString;
 
             this.Invoke((Action)(() =>
             {
-                // 确保控件仍然存在
                 if (btnCheckUpdate == null || btnSkipVersion == null || lblUpdateContent == null)
                     return;
 
@@ -292,7 +297,6 @@ namespace HomeworkViewer
                                     btnCheckUpdate.Enabled = false;
                                     btnCheckUpdate.Text = "准备下载...";
 
-                                    // 显示进度控件
                                     progressDownload.Visible = true;
                                     lblDownloadStatus.Visible = true;
                                     lblDownloadStatus.Text = "准备下载...";
@@ -303,8 +307,7 @@ namespace HomeworkViewer
                                         var assets = await _downloadHelper.GetLatestReleaseAssetsAsync("Suixiuliang", "HomeworkViewer");
                                         if (assets.Count > 0)
                                         {
-                                            var archInfo = _downloadHelper.GetCurrentSystemArch();
-                                            var bestAsset = _downloadHelper.FindBestMatchAsset(assets, archInfo);
+                                            var bestAsset = _downloadHelper.FindBestMatchAsset(assets);
 
                                             if (bestAsset != null)
                                             {
@@ -318,34 +321,58 @@ namespace HomeworkViewer
                                                 {
                                                     btnCheckUpdate.Text = "下载中...";
 
-                                                    // 使用进度报告更新UI
-                                                    var progress = new Progress<int>(p =>
+                                                    var progress = new Progress<DownloadProgressInfo>(p =>
                                                     {
                                                         if (!this.IsDisposed)
                                                         {
                                                             this.Invoke((Action)(() =>
                                                             {
-                                                                progressDownload.Value = Math.Min(p, 100);
-                                                                lblDownloadStatus.Text = $"下载中 {p}%";
+                                                                progressDownload.Value = Math.Min(p.Percentage, 100);
+                                                                string speed = p.SpeedKBps > 0 ? $"{p.SpeedKBps:F1} KB/s" : "计算中...";
+                                                                string remaining = p.TimeRemaining > TimeSpan.Zero ? $"{p.TimeRemaining:mm\\:ss}" : "--:--";
+                                                                lblDownloadStatus.Text = $"下载中 {p.Percentage}% | {speed} | 剩余 {remaining}";
                                                             }));
                                                         }
                                                     });
 
+                                                    string expectedHash = null;
+                                                    if (remoteInfo.Hash != null && remoteInfo.Hash.StartsWith("sha256:"))
+                                                        expectedHash = remoteInfo.Hash.Substring(7);
+
                                                     string downloadedFile = await _downloadHelper.DownloadFileAsync(
                                                         bestAsset.DownloadUrl,
                                                         bestAsset.Name,
+                                                        expectedHash,
                                                         progress);
 
-                                                    // 下载完成，隐藏进度控件
                                                     progressDownload.Visible = false;
                                                     lblDownloadStatus.Visible = false;
                                                     btnCheckUpdate.Text = "下载完成";
 
-                                                    _downloadHelper.OpenOrInstallFile(downloadedFile);
+                                                    // 设置更新待处理标志
+                                                    config.UpdatePending = 1;
+                                                    config.Save();
+
+                                                    // 弹窗提示
+                                                    DialogResult dialogResult = MessageBox.Show(
+                                                        "更新包已下载完成。请点击确定启动安装程序，应用将自动关闭。",
+                                                        "更新",
+                                                        MessageBoxButtons.OKCancel,
+                                                        MessageBoxIcon.Information);
+
+                                                    if (dialogResult == DialogResult.OK)
+                                                    {
+                                                        _downloadHelper.OpenOrInstallFile(downloadedFile);
+                                                        Application.Exit();
+                                                    }
+                                                    else
+                                                    {
+                                                        btnCheckUpdate.Enabled = true;
+                                                        btnCheckUpdate.Text = "检查更新";
+                                                    }
                                                 }
                                                 else
                                                 {
-                                                    // 用户取消下载，恢复按钮
                                                     btnCheckUpdate.Enabled = true;
                                                     btnCheckUpdate.Text = "检查更新";
                                                     progressDownload.Visible = false;
@@ -355,7 +382,7 @@ namespace HomeworkViewer
                                             else
                                             {
                                                 var result = MessageBox.Show(
-                                                    "未能自动匹配适合您系统的安装包。是否前往Releases页面手动下载？",
+                                                    "未能自动匹配适合的安装包。是否前往Releases页面手动下载？",
                                                     "提示",
                                                     MessageBoxButtons.YesNo,
                                                     MessageBoxIcon.Information);
@@ -385,10 +412,9 @@ namespace HomeworkViewer
                                         lblDownloadStatus.Visible = false;
                                     }
                                 };
-
+                                btnCheckUpdate.Enabled = true;  // 关键：让按钮可点击
                                 btnSkipVersion.Visible = true;
                                 btnSkipVersion.Text = $"跳过 {remoteInfo.Version}";
-
                                 _ = LoadAndDisplayReleaseNotes(remoteInfo.Version);
                             }
                         }
@@ -461,7 +487,7 @@ namespace HomeworkViewer
             this.MinimizeBox = false;
 
             Panel sidebar = new Panel { Dock = DockStyle.Left, Width = 120, BackColor = Color.FromArgb(30, 30, 30) };
-            
+
             btnAbout = CreateSidebarButton("关于", 4);
             btnReps = CreateSidebarButton("科代表", 3);
             btnTimeSlot = CreateSidebarButton("时间段", 2);
@@ -601,7 +627,7 @@ namespace HomeworkViewer
             {
                 Dock = DockStyle.Top,
                 ColumnCount = 2,
-                RowCount = 5,
+                RowCount = 6,
                 Padding = new Padding(0),
                 AutoSize = true,
                 BackColor = Color.Transparent
@@ -649,6 +675,21 @@ namespace HomeworkViewer
             barColorPanel.Controls.Add(btnBarColor);
             barColorPanel.Controls.Add(pnlBarColorPreview);
             layout.Controls.Add(barColorPanel, 1, 3);
+
+            // 背景效果
+            Label lblBgEffect = new Label { Text = "背景效果:", TextAlign = ContentAlignment.MiddleRight, ForeColor = Color.White, BackColor = Color.Transparent, AutoSize = true };
+            layout.Controls.Add(lblBgEffect, 0, 4);
+            cmbBgEffect = new ComboBox
+            {
+                DropDownStyle = ComboBoxStyle.DropDownList,
+                Width = 150,
+                BackColor = Color.FromArgb(64, 64, 64),
+                ForeColor = Color.White,
+                FlatStyle = FlatStyle.Flat
+            };
+            cmbBgEffect.Items.AddRange(new object[] { "Mica", "Acrylic", "Aero" });
+            cmbBgEffect.SelectedItem = config.BackgroundEffect;
+            layout.Controls.Add(cmbBgEffect, 1, 4);
 
             appearancePanel.Controls.Add(layout);
         }
@@ -851,19 +892,18 @@ namespace HomeworkViewer
             {
                 Dock = DockStyle.Top,
                 ColumnCount = 1,
-                RowCount = 8, // 增加两行用于进度控件
+                RowCount = 8,
                 Padding = new Padding(0),
                 AutoSize = true,
                 BackColor = Color.Transparent
             };
-            Label lblVersion = new Label { Text = "作业展板 版本 1.2.0", Font = new Font("微软雅黑", 12, FontStyle.Bold), AutoSize = true, ForeColor = Color.White, BackColor = Color.Transparent };
+            Label lblVersion = new Label { Text = "作业展板 版本 1.3.0", Font = new Font("微软雅黑", 12, FontStyle.Bold), AutoSize = true, ForeColor = Color.White, BackColor = Color.Transparent };
             layout.Controls.Add(lblVersion, 0, 0);
             Label lblAuthor = new Label { Text = "\n作者: MaxSui 隋修梁", AutoSize = true, ForeColor = Color.White, BackColor = Color.Transparent, Font = new Font("微软雅黑", 10) };
             layout.Controls.Add(lblAuthor, 0, 1);
             Label lblCopyright = new Label { Text = "\n© 2026 MaxSui 保留部分权利 \n本软件遵循GNU General Public License 3.0开源协议", AutoSize = true, ForeColor = Color.White, BackColor = Color.Transparent };
             layout.Controls.Add(lblCopyright, 0, 2);
 
-            // 镜像状态显示
             lblMirrorStatus = new Label
             {
                 Text = "正在检测镜像站...",
@@ -874,7 +914,6 @@ namespace HomeworkViewer
             };
             layout.Controls.Add(lblMirrorStatus, 0, 3);
 
-            // 手动选择镜像下拉框
             cmbMirrorManual = new ComboBox
             {
                 DropDownStyle = ComboBoxStyle.DropDownList,
@@ -895,7 +934,6 @@ namespace HomeworkViewer
             };
             layout.Controls.Add(cmbMirrorManual, 0, 4);
 
-            // 下载进度条和状态标签
             progressDownload = new ProgressBar
             {
                 Width = 200,
@@ -918,7 +956,6 @@ namespace HomeworkViewer
             };
             layout.Controls.Add(lblDownloadStatus, 0, 6);
 
-            // 检查更新按钮和跳过按钮
             FlowLayoutPanel updatePanel = new FlowLayoutPanel { FlowDirection = FlowDirection.LeftToRight, AutoSize = true, BackColor = Color.Transparent, Margin = new Padding(0, 10, 0, 0) };
             btnCheckUpdate = new Button { Text = "检查更新", Width = 100, Height = 30, BackColor = Color.FromArgb(64, 64, 64), ForeColor = Color.White, FlatStyle = FlatStyle.Flat };
             btnCheckUpdate.Click += btnCheckUpdate_Click;
@@ -935,7 +972,6 @@ namespace HomeworkViewer
 
             aboutPanel.Controls.Add(layout);
 
-            // 异步更新镜像状态
             _ = UpdateMirrorStatusAsync(lblMirrorStatus);
         }
 
@@ -984,6 +1020,7 @@ namespace HomeworkViewer
             if (config.FontColorWhite) rbWhite.Checked = true; else rbBlack.Checked = true;
             pnlBarColorPreview.BackColor = ParseColor(config.BarColor, Color.Yellow);
             numScrollSpeed.Value = config.ScrollSpeed;
+            // 背景效果已在控件创建时从config加载
         }
 
         private void BtnOK_Click(object sender, EventArgs e)
@@ -994,6 +1031,7 @@ namespace HomeworkViewer
             config.BackgroundOpacity = trackBgOpacity.Value;
             config.FontColorWhite = rbWhite.Checked;
             config.ScrollSpeed = (int)numScrollSpeed.Value;
+            config.BackgroundEffect = cmbBgEffect.SelectedItem?.ToString() ?? "Mica";
 
             config.EveningClassCount = (int)numEveningCount.Value;
             config.EveningClassTimes.Clear();

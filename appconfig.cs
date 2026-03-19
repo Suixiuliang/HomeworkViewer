@@ -21,15 +21,17 @@ namespace HomeworkViewer
         public bool FontColorWhite { get; set; } = false;
         public string BarColor { get; set; } = "255,255,0";
 
-        // 晚修配置
         public int EveningClassCount { get; set; } = 3;
         public List<EveningClassTime> EveningClassTimes { get; set; } = new List<EveningClassTime>();
 
-        // 滚动速度 (像素/秒)
         public int ScrollSpeed { get; set; } = 30;
 
-        // 科代表（全局配置，不随日期变化）
         public Dictionary<string, string> ClassReps { get; set; } = new Dictionary<string, string>();
+
+        public string BackgroundEffect { get; set; } = "Mica";
+
+        // 新增：更新待处理标志
+        public int UpdatePending { get; set; } = 0;
 
         private static string GetConfigPath()
         {

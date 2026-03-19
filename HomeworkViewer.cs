@@ -15,7 +15,7 @@ namespace HomeworkViewer
     {
         // 常量
         private readonly Size VIRTUAL_SIZE = new Size(1200, 675);
-        private const int BTN_SQUARE_SIZE = 46; // 正方形按钮边长
+        private const int BTN_SQUARE_SIZE = 46;
         private readonly Point FULLSCREEN_BTN_POS = new Point(1200 - BTN_SQUARE_SIZE - 10, 13);
         private readonly Point HISTORY_BTN_POS = new Point(1200 - BTN_SQUARE_SIZE - 10 - BTN_SQUARE_SIZE - 10, 13);
         private readonly Point EDIT_BTN_POS = new Point(1200 - BTN_SQUARE_SIZE - 10 - BTN_SQUARE_SIZE - 10 - BTN_SQUARE_SIZE - 10, 13);
@@ -83,7 +83,7 @@ namespace HomeworkViewer
 
         // 图片资源
         private Image buttonImage, historyBtnImage, backBtnImage, leftArrowImage, rightArrowImage;
-        private Dictionary<string, Image> buttonIcons = new Dictionary<string, Image>(); // 图标字典
+        private Dictionary<string, Image> buttonIcons = new Dictionary<string, Image>();
 
         // 配置
         private AppConfig appConfig;
@@ -92,9 +92,9 @@ namespace HomeworkViewer
         private float[] fontScales = { 0.8f, 1.0f, 1.2f };
         private string[] currentSubjects;
 
-        // 托盘图标
-        private NotifyIcon trayIcon;
-        private ContextMenuStrip trayMenu;
+        // 托盘图标（禁用）
+        // private NotifyIcon trayIcon;
+        // private ContextMenuStrip trayMenu;
 
         // 保存最小化前的窗口大小和状态
         private Size _savedClientSize;
@@ -142,6 +142,11 @@ namespace HomeworkViewer
         // 未交名单每页显示行数
         private const int UNSUBMITTED_ROWS_PER_PAGE = 3;
 
+        // 新增：背景效果相关
+        private string _currentBackgroundEffect = "Mica";
+        private bool _isWin10OrAbove = false;
+        private bool _sizing = false;
+
         public HomeworkViewer()
         {
             SETTINGS_BTN_POS = new Point(ROTATE_BTN_POS.X - BTN_SQUARE_SIZE - 10, 13);
@@ -155,6 +160,7 @@ namespace HomeworkViewer
             DoubleBuffered = true;
             KeyPreview = true;
             BackColor = Color.Black;
+            ResizeRedraw = false;
 
             appConfig = AppConfig.Load();
             _backgroundAlpha = (int)(appConfig.BackgroundOpacity / 100f * 255);
@@ -183,16 +189,42 @@ namespace HomeworkViewer
             this.MouseUp += OnMouseUp;
             this.MouseLeave += OnMouseLeave;
             this.Resize += OnResize;
-            this.Load += OnLoad;
+            this.Load += OnLoad; // 修正：确保 OnLoad 方法签名正确
             this.Activated += OnActivated;
             this.FormClosing += OnFormClosing;
 
-            InitializeTrayIcon();
+            // InitializeTrayIcon();
             InitializeModeComboBox();
+
+            CheckWindowsVersion();
+            ApplyBackgroundEffect(appConfig.BackgroundEffect);
 
             CheckEveningClassStates();
         }
 
+        // 确保 OnLoad 方法签名正确
+        private void OnLoad(object sender, EventArgs e)
+        {
+            // 应用保存的背景效果（而非固定 Mica）
+            ApplyBackgroundEffect(appConfig.BackgroundEffect);
+
+            // 检查是否有待处理的更新
+            if (appConfig.UpdatePending == 1)
+            {
+                string appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+                string upgradePath = Path.Combine(appData, "HomeworkViewerUpgrader");
+                if (Directory.Exists(upgradePath))
+                {
+                    try
+                    {
+                        Directory.Delete(upgradePath, true);
+                    }
+                    catch { }
+                }
+                appConfig.UpdatePending = 0;
+                appConfig.Save();
+            }
+        }
         // ---------- 时间提醒 ----------
         private void CheckEveningClassStates()
         {
@@ -315,7 +347,6 @@ namespace HomeworkViewer
         // ---------- 滚动 ----------
         private void ScrollTimer_Tick(object sender, EventArgs e)
         {
-            // 编辑模式下不进行任何滚动更新
             if (editMode) return;
 
             bool needRedraw = false;
@@ -330,7 +361,7 @@ namespace HomeworkViewer
             }
             else if (unsubmittedMode)
             {
-                // 未交名单模式不滚动
+                // 未交名单不滚动
             }
             else
             {
@@ -346,7 +377,7 @@ namespace HomeworkViewer
 
                 Rectangle textArea = GetContentArea(i);
                 float contentHeight = MeasureTextHeight(content, font30, textArea.Width);
-                if (contentHeight <= textArea.Height) continue; // 内容无需滚动
+                if (contentHeight <= textArea.Height) continue;
 
                 if (!scrollOffsets.ContainsKey(i)) scrollOffsets[i] = 0f;
                 if (!scrollPaused.ContainsKey(i)) scrollPaused[i] = false;
@@ -358,38 +389,31 @@ namespace HomeworkViewer
                 {
                     if ((DateTime.Now - pauseStartTime[i]).TotalSeconds >= SCROLL_PAUSE_SECONDS)
                     {
-                        if (scrollOffsets[i] >= contentHeight - textArea.Height - epsilon) // 在底部暂停
+                        if (scrollOffsets[i] >= contentHeight - textArea.Height - epsilon)
                         {
-                            // 重置到顶部，并进入顶部暂停
                             scrollOffsets[i] = 0f;
                             pauseStartTime[i] = DateTime.Now;
-                            // scrollPaused[i] 保持 true
                         }
-                        else // 在顶部暂停
+                        else
                         {
                             scrollPaused[i] = false;
-                            // 给予一个微小偏移量，使其脱离顶部暂停条件
                             scrollOffsets[i] = speed;
                         }
                     }
                 }
                 else
                 {
-                    // 未暂停，检查是否已在顶部（可能刚重置或刚解除暂停后被设为了speed）
-                    if (scrollOffsets[i] <= epsilon) // 在顶部
+                    if (scrollOffsets[i] <= epsilon)
                     {
-                        // 进入顶部暂停
                         scrollPaused[i] = true;
                         pauseStartTime[i] = DateTime.Now;
-                        // 注意：此时scrollOffsets仍为0或接近0
                     }
                     else
                     {
-                        // 向下滚动
                         scrollOffsets[i] += speed;
                         if (scrollOffsets[i] >= contentHeight - textArea.Height - epsilon)
                         {
-                            scrollOffsets[i] = contentHeight - textArea.Height; // 精确到底
+                            scrollOffsets[i] = contentHeight - textArea.Height;
                             scrollPaused[i] = true;
                             pauseStartTime[i] = DateTime.Now;
                         }
@@ -437,23 +461,20 @@ namespace HomeworkViewer
                     editMode = value;
                     if (editMode)
                     {
-                        // 进入编辑模式
                         if (!unsubmittedMode)
                         {
                             CreateTimeComboBoxes();
                         }
-                        // 重置滚动状态，使内容显示顶部
+                        // 重置滚动状态
                         scrollOffsets.Clear();
                         scrollPaused.Clear();
                         pauseStartTime.Clear();
                     }
                     else
                     {
-                        // 退出编辑模式
                         DestroyTimeComboBoxes();
                         if (editingSubjectIndex != -1)
                             FinishInlineEdit();
-                        // 重置滚动状态，重新开始
                         scrollOffsets.Clear();
                         scrollPaused.Clear();
                         pauseStartTime.Clear();
@@ -556,65 +577,62 @@ namespace HomeworkViewer
             SaveHomeworkData();
         }
 
-        // ---------- 初始化托盘图标 ----------
-        private void InitializeTrayIcon()
-        {
-            trayMenu = new ContextMenuStrip();
-            trayMenu.Items.Add("显示", null, (s, e) => ShowWindow());
-            trayMenu.Items.Add("退出", null, (s, e) => ExitApplication());
+        // ---------- 初始化托盘图标 ---------- 
+        // private void InitializeTrayIcon()
+        // {
+        //     trayMenu = new ContextMenuStrip();
+        //     trayMenu.Items.Add("显示", null, (s, e) => ShowWindow());
+        //     trayMenu.Items.Add("退出", null, (s, e) => ExitApplication());
 
-            trayIcon = new NotifyIcon
-            {
-                ContextMenuStrip = trayMenu,
-                Visible = true,
-                Text = "作业展板"
-            };
+        //     trayIcon = new NotifyIcon
+        //     {
+        //         ContextMenuStrip = trayMenu,
+        //         Visible = true,
+        //         Text = "作业展板"
+        //     };
 
-            string iconPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Slide", "icon.ico");
-            if (File.Exists(iconPath))
-            {
-                trayIcon.Icon = new Icon(iconPath);
-            }
-            else
-            {
-                trayIcon.Icon = SystemIcons.Application;
-            }
+        //     string iconPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Slide", "icon.ico");
+        //     if (File.Exists(iconPath))
+        //     {
+        //         trayIcon.Icon = new Icon(iconPath);
+        //     }
+        //     else
+        //     {
+        //         trayIcon.Icon = SystemIcons.Application;
+        //     }
 
-            trayIcon.MouseDoubleClick += (s, e) =>
-            {
-                if (e.Button == MouseButtons.Left)
-                    ShowWindow();
-            };
-        }
+        //     trayIcon.MouseDoubleClick += (s, e) =>
+        //     {
+        //         if (e.Button == MouseButtons.Left)
+        //             ShowWindow();
+        //     };
+        // }
 
-        private void ShowWindow()
-        {
-            this.Show();
-            if (_savedClientSize != Size.Empty)
-            {
-                this.ClientSize = _savedClientSize;
-            }
-            this.WindowState = _savedWindowState != FormWindowState.Minimized ? _savedWindowState : FormWindowState.Normal;
-            UpdateScale();
-            Invalidate();
-            this.Activate();
-        }
+        // private void ShowWindow()
+        // {
+        //     this.Show();
+        //     if (_savedClientSize != Size.Empty)
+        //     {
+        //         this.ClientSize = _savedClientSize;
+        //     }
+        //     this.WindowState = _savedWindowState != FormWindowState.Minimized ? _savedWindowState : FormWindowState.Normal;
+        //     UpdateScale();
+        //     Invalidate();
+        //     this.Activate();
+        // }
 
-        private void ExitApplication()
-        {
-            trayIcon.Visible = false;
-            trayIcon.Dispose();
-            Application.Exit();
-        }
+        // private void ExitApplication()
+        // {
+        //     trayIcon.Visible = false;
+        //     trayIcon.Dispose();
+        //     Application.Exit();
+        // }
 
         private void OnFormClosing(object sender, FormClosingEventArgs e)
         {
-            if (e.CloseReason == CloseReason.UserClosing)
-            {
-                e.Cancel = true;
-                this.Hide();
-                trayIcon.ShowBalloonTip(1000, "作业展板", "程序已最小化到托盘，点击图标可恢复。", ToolTipIcon.Info);
-            }
+            // 不再取消关闭，允许直接退出
+            // 清理资源（可选）
+            // 禁用
         }
 
         // ---------- 公开方法供设置窗体调用 ----------
@@ -631,6 +649,7 @@ namespace HomeworkViewer
             {
                 CreateTimeComboBoxes();
             }
+            ApplyBackgroundEffect(appConfig.BackgroundEffect);
             Invalidate();
         }
 
@@ -679,10 +698,39 @@ namespace HomeworkViewer
             CalculateGridRects();
         }
 
-        // ---------- Mica 效果 ----------
-        private void OnLoad(object sender, EventArgs e)
+        // ---------- 背景效果 ----------
+        private void CheckWindowsVersion()
         {
-            EnableMica();
+            OperatingSystem os = Environment.OSVersion;
+            Version v = os.Version;
+            if (v.Major >= 10)
+            {
+                _isWin10OrAbove = true;
+            }
+        }
+
+        public void ApplyBackgroundEffect(string effect)
+        {
+            _currentBackgroundEffect = effect;
+            try
+            {
+                switch (effect)
+                {
+                    case "Mica":
+                        EnableMica();
+                        break;
+                    case "Acrylic":
+                        EnableAcrylic();
+                        break;
+                    case "Aero":
+                        EnableAero();
+                        break;
+                    default:
+                        EnableMica();
+                        break;
+                }
+            }
+            catch { }
         }
 
         private void EnableMica()
@@ -712,7 +760,7 @@ namespace HomeworkViewer
             catch { }
         }
 
-        private void EnableAcrylicFallback()
+        private void EnableAcrylic()
         {
             try
             {
@@ -737,6 +785,37 @@ namespace HomeworkViewer
             catch { }
         }
 
+        private void EnableAero()
+        {
+            try
+            {
+                var accent = new AccentPolicy
+                {
+                    AccentState = AccentState.ACCENT_ENABLE_BLURBEHIND,
+                    GradientColor = 0x99000000
+                };
+                int accentStructSize = Marshal.SizeOf(accent);
+                IntPtr accentPtr = Marshal.AllocHGlobal(accentStructSize);
+                Marshal.StructureToPtr(accent, accentPtr, false);
+                var data = new WindowCompositionAttributeData
+                {
+                    Attribute = WindowCompositionAttribute.WCA_ACCENT_POLICY,
+                    SizeOfData = accentStructSize,
+                    Data = accentPtr
+                };
+                SetWindowCompositionAttribute(this.Handle, ref data);
+                Marshal.FreeHGlobal(accentPtr);
+                _micaEnabled = true;
+            }
+            catch { }
+        }
+
+        private void EnableAcrylicFallback()
+        {
+            EnableAcrylic();
+        }
+
+        // ---------- Mica API ----------
         private const int DWMWA_USE_IMMERSIVE_DARK_MODE = 20;
         private const int DWMWA_MICA = 1029;
         [DllImport("dwmapi.dll")]
@@ -806,6 +885,15 @@ namespace HomeworkViewer
         private void LoadHomeworkData(DateTime date)
         {
             homeworkData = HomeworkData.Load(date);
+            if (homeworkData.DueTimes.Count == 0)
+            {
+                foreach (string subject in currentSubjects)
+                {
+                    // 如果晚修节数配置大于等于3，则默认设置为“晚修3”，否则设置为“无”
+                    string defaultDue = appConfig.EveningClassCount >= 3 ? "晚修3" : "无";
+                    homeworkData.DueTimes[subject] = defaultDue;
+                }
+            }
             if (EditMode && !unsubmittedMode)
             {
                 CreateTimeComboBoxes();
@@ -921,10 +1009,11 @@ namespace HomeworkViewer
             {
                 _savedClientSize = this.ClientSize;
                 _savedWindowState = this.WindowState;
-                // 移除 Hide() 和托盘提示，让窗口正常最小化
+                // 注意：不要 Hide()，也不要显示托盘提示
                 return; // 直接返回，不执行后续缩放逻辑
             }
 
+            // 以下原有缩放逻辑保持不变
             if (_resizing || fullscreen || WindowState == FormWindowState.Maximized) return;
 
             _resizing = true;
@@ -939,7 +1028,10 @@ namespace HomeworkViewer
             {
                 CreateTimeComboBoxes();
             }
-            Invalidate();
+            if (!_isWin10OrAbove || !_sizing)
+            {
+                Invalidate();
+            }
         }
 
         private void OnActivated(object sender, EventArgs e)
@@ -950,10 +1042,26 @@ namespace HomeworkViewer
 
         protected override void WndProc(ref Message m)
         {
+            const int WM_ENTERSIZEMOVE = 0x0231;
+            const int WM_EXITSIZEMOVE = 0x0232;
             const int WM_SYSCOMMAND = 0x0112;
             const int SC_MAXIMIZE = 0xF030;
             const int WM_SIZE = 0x0005;
             const int SIZE_RESTORED = 0;
+
+            if (_isWin10OrAbove)
+            {
+                if (m.Msg == WM_ENTERSIZEMOVE)
+                {
+                    _sizing = true;
+                }
+                else if (m.Msg == WM_EXITSIZEMOVE)
+                {
+                    _sizing = false;
+                    UpdateScale();
+                    Invalidate(true);
+                }
+            }
 
             if (m.Msg == WM_SYSCOMMAND && (int)m.WParam == SC_MAXIMIZE)
             {
@@ -968,10 +1076,13 @@ namespace HomeworkViewer
                     this.ClientSize = _savedClientSize;
                 }
                 UpdateScale();
-                Invalidate();
+                if (!_sizing)
+                {
+                    Invalidate();
+                }
                 if (!_micaEnabled)
                 {
-                    EnableMica();
+                    ApplyBackgroundEffect(_currentBackgroundEffect);
                 }
             }
 
@@ -1139,9 +1250,7 @@ namespace HomeworkViewer
                 }
                 else if (fullscreenBtnRect.Contains(x, y))
                 {
-                    // 全屏前先退出编辑模式
-                    if (EditMode)
-                        EditMode = false;
+                    if (EditMode) EditMode = false;
                     ToggleFullscreen();
                 }
             }
@@ -1197,9 +1306,7 @@ namespace HomeworkViewer
                 }
                 else if (fullscreenBtnRect.Contains(x, y))
                 {
-                    // 全屏前先退出编辑模式
-                    if (EditMode)
-                        EditMode = false;
+                    if (EditMode) EditMode = false;
                     ToggleFullscreen();
                 }
                 else if (EditMode)
@@ -1293,9 +1400,7 @@ namespace HomeworkViewer
                 }
                 else if (fullscreenBtnRect.Contains(x, y))
                 {
-                    // 全屏前先退出编辑模式
-                    if (EditMode)
-                        EditMode = false;
+                    if (EditMode) EditMode = false;
                     ToggleFullscreen();
                 }
                 else if (EditMode && !rotationMode && !unsubmittedMode)
@@ -1460,7 +1565,6 @@ namespace HomeworkViewer
         private void LoadImages()
         {
             string imagePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Slide");
-            // 原有图片
             buttonImage = LoadImage(Path.Combine(imagePath, "按钮.png"), new Size(BTN_SQUARE_SIZE, BTN_SQUARE_SIZE));
             historyBtnImage = LoadImage(Path.Combine(imagePath, "更多.png"), new Size(BTN_SQUARE_SIZE, BTN_SQUARE_SIZE));
 
@@ -1479,9 +1583,8 @@ namespace HomeworkViewer
                 rightArrowImage.RotateFlip(RotateFlipType.RotateNoneFlipX);
             }
 
-            // 加载所有按钮图标（高质量缩放）
             string[] iconNames = { "编辑", "返回", "记录", "轮换", "全屏", "设置", "缩小", "完成", "未交人员" };
-            int iconSize = (int)(BTN_SQUARE_SIZE * 0.6); // 图标占按钮高度的60%，避免重叠
+            int iconSize = (int)(BTN_SQUARE_SIZE * 0.6);
             foreach (string name in iconNames)
             {
                 string filePath = Path.Combine(imagePath, name + ".png");
@@ -1489,16 +1592,13 @@ namespace HomeworkViewer
                 {
                     using (Image img = Image.FromFile(filePath))
                     {
-                        // 创建目标位图，保留透明度
                         Bitmap targetBitmap = new Bitmap(iconSize, iconSize, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
                         using (Graphics g = Graphics.FromImage(targetBitmap))
                         {
-                            // 设置高质量插值模式
                             g.InterpolationMode = InterpolationMode.HighQualityBicubic;
                             g.SmoothingMode = SmoothingMode.HighQuality;
                             g.PixelOffsetMode = PixelOffsetMode.HighQuality;
                             g.CompositingQuality = CompositingQuality.HighQuality;
-                            // 绘制缩放后的图像
                             g.DrawImage(img, 0, 0, iconSize, iconSize);
                         }
                         buttonIcons[name] = targetBitmap;
@@ -1629,7 +1729,6 @@ namespace HomeworkViewer
 
             g.ResetTransform();
         }
-
         private void DrawDateInfo(Graphics g, Rectangle barRect)
         {
             DateTime now = historyMode && historyDate.HasValue ? historyDate.Value : currentDate;
@@ -1667,13 +1766,11 @@ namespace HomeworkViewer
         {
             if (rotationMode || unsubmittedMode)
             {
-                // 左上角返回按钮
                 int backY = barRect.Top + (barRect.Height - BTN_SQUARE_SIZE) / 2;
                 backBtnRect = new Rectangle(35, backY, BTN_SQUARE_SIZE, BTN_SQUARE_SIZE);
 
                 DrawTransparentButton(g, backBtnRect, "返回", buttonIcons.ContainsKey("返回") ? buttonIcons["返回"] : null, ref backBtnRect, backBtnRect.Location, _backPressed);
 
-                // 右上角三个按钮
                 int btnY = barRect.Top + (barRect.Height - BTN_SQUARE_SIZE) / 2;
                 int totalButtonsWidth = 3 * BTN_SQUARE_SIZE + 2 * 10;
                 int startX = barRect.Right - totalButtonsWidth - 20;
@@ -1692,7 +1789,6 @@ namespace HomeworkViewer
                 string fullscreenIconKey = fullscreen ? "缩小" : "全屏";
                 DrawTransparentButton(g, fullscreenBtnRect, fullscreen ? "缩小" : "全屏", buttonIcons.ContainsKey(fullscreenIconKey) ? buttonIcons[fullscreenIconKey] : null, ref fullscreenBtnRect, fullscreenPos, _fullscreenPressed);
 
-                // 绘制左右箭头（如果分页）
                 if (unsubmittedMode)
                 {
                     int totalPages = (currentSubjects.Length + UNSUBMITTED_ROWS_PER_PAGE - 1) / UNSUBMITTED_ROWS_PER_PAGE;
@@ -1778,11 +1874,9 @@ namespace HomeworkViewer
         {
             targetRect = new Rectangle(pos, new Size(BTN_SQUARE_SIZE, BTN_SQUARE_SIZE));
 
-            // 可调参数（可根据需要修改）
-            const int iconTopMargin = 3;      // 图标上边距（像素）
-            const float textBottomMargin = 1; // 文字下边距（像素，原为3，现增加2达到下移效果）
+            const int iconTopMargin = 3;
+            const float textBottomMargin = 1;
 
-            // 绘制图标
             if (icon != null)
             {
                 int iconX = targetRect.Left + (targetRect.Width - icon.Width) / 2;
@@ -1790,7 +1884,6 @@ namespace HomeworkViewer
                 g.DrawImage(icon, iconX, iconY, icon.Width, icon.Height);
             }
 
-            // 绘制文字
             using (Font smallFont = new Font("微软雅黑", 8))
             {
                 SizeF textSize = g.MeasureString(text, smallFont);
@@ -1813,7 +1906,6 @@ namespace HomeworkViewer
             {
                 Rectangle rect = gridRects[i];
 
-                // 阴影
                 int shadowOffset = 3;
                 Rectangle shadowRect = new Rectangle(rect.X + shadowOffset, rect.Y + shadowOffset, rect.Width, rect.Height);
                 using (GraphicsPath shadowPath = CreateRoundedRectPath(shadowRect, ROUND_RADIUS))
@@ -1824,7 +1916,6 @@ namespace HomeworkViewer
                     }
                 }
 
-                // 卡片主体背景（毛玻璃渐变）
                 int topAlpha = (int)(220 * opacityFactor);
                 int bottomAlpha = (int)(160 * opacityFactor);
                 using (GraphicsPath path = CreateRoundedRectPath(rect, ROUND_RADIUS))
@@ -1844,8 +1935,8 @@ namespace HomeworkViewer
                     bool highlightActive = _activeEvenings.Contains(dueTime);
                     bool highlightFlash = _flashingEvenings.Contains(dueTime);
                     bool highlightGray = _grayEvenings.Contains(dueTime);
-                    Color borderColor = Color.FromArgb(100, 128, 128, 128); // 默认边框颜色
-                    float borderWidth = 1; // 默认边框宽度
+                    Color borderColor = Color.FromArgb(100, 128, 128, 128);
+                    float borderWidth = 1;
 
                     if (_debugFlashing || highlightFlash)
                     {
@@ -1856,24 +1947,19 @@ namespace HomeworkViewer
                         }
                         DrawLaserBorder(g, path, rect);
                         borderColor = Color.FromArgb(200, 255, 0, 0);
-                        // 闪烁时边框宽度保持1，激光已单独处理
                     }
                     else if (highlightActive)
                     {
-                        // 晚修进行时：不填充任何额外背景，仅边框加粗为2，颜色使用系统高亮色
                         borderColor = SystemColors.Highlight;
                         borderWidth = 2;
                     }
-                    // highlightGray 等其他情况不处理，保持默认
 
-                    // 绘制卡片边框
                     using (Pen borderPen = new Pen(borderColor, borderWidth))
                     {
                         g.DrawPath(borderPen, path);
                     }
                 }
 
-                // 绘制科目名称、横线、提交时间、作业内容等（以下代码保持不变）
                 if (i < currentSubjects.Length)
                 {
                     string subject = currentSubjects[i];
@@ -1981,7 +2067,6 @@ namespace HomeworkViewer
                 }
                 else if (highlightActive)
                 {
-                    // 晚修进行时：不填充额外背景，仅边框加粗为2，颜色使用系统高亮色
                     borderColor = SystemColors.Highlight;
                     borderWidth = 2;
                 }
@@ -1992,7 +2077,6 @@ namespace HomeworkViewer
                 }
             }
 
-            // 以下为卡片内部其他内容绘制（保持不变）
             string subject2 = currentSubjects[rotationIndex];
             g.DrawString(subject2, font36, Brushes.White, new PointF(600 - (int)g.MeasureString(subject2, font36).Width / 2, bigRect.Top + 30));
 
@@ -2037,7 +2121,6 @@ namespace HomeworkViewer
 
         private void DrawUnsubmittedView(Graphics g)
         {
-            // 确保字体有效
             if (font30 == null || fontSmall == null || font22 == null || hintFont == null)
             {
                 ApplyFontSettings();
@@ -2074,21 +2157,18 @@ namespace HomeworkViewer
                 int rowHeight = (bigRect.Height - 120) / UNSUBMITTED_ROWS_PER_PAGE;
                 int baseY = bigRect.Top + 100;
 
-                // 定义间距常量
-                const int subjectToCountSpacing = 2;   // 科目与人数统计间距
-                const int countToListSpacing = 5;      // 人数统计与名单区域间距
-                const int listVerticalPadding = -300;      // 名单区域上下内边距
+                const int subjectToCountSpacing = 2;
+                const int countToListSpacing = 5;
+                const int listVerticalPadding = 3;
 
                 for (int i = startIndex; i < endIndex; i++)
                 {
                     string subject = currentSubjects[i];
                     int rowY = baseY + (i - startIndex) * rowHeight;
 
-                    // 绘制科目名称（左对齐）
                     float subjectY = rowY + 5;
                     g.DrawString(subject, font22, new SolidBrush(TEXT_COLOR), new PointF(bigRect.Left + 50, subjectY));
 
-                    // 计算人数
                     string unsubmittedText = homeworkData.Unsubmitted.ContainsKey(subject) ? homeworkData.Unsubmitted[subject] : "";
                     int peopleCount = 0;
                     if (!string.IsNullOrWhiteSpace(unsubmittedText))
@@ -2100,7 +2180,6 @@ namespace HomeworkViewer
                             peopleCount = 1;
                     }
 
-                    // 绘制人数统计（红色）
                     string countText = peopleCount.ToString();
                     string suffixText = "人未交";
                     float countWidth = g.MeasureString(countText, font30).Width;
@@ -2109,13 +2188,12 @@ namespace HomeworkViewer
                     g.DrawString(countText, font30, Brushes.Red, statsX, statsY);
                     g.DrawString(suffixText, fontSmall, Brushes.Red, statsX + countWidth, statsY + font30.Height - fontSmall.Height - 2);
 
-                    // 计算名单区域
-                    float usedHeight = (subjectY - rowY) + font22.Height + subjectToCountSpacing + font30.Height; // 从 rowY 到人数统计底部的高度
-                    float availableForList = rowHeight - usedHeight - countToListSpacing; // 减去人数统计与名单之间的间距
-                    if (availableForList < listVerticalPadding * 2) availableForList = listVerticalPadding * 2; // 保证至少有内边距空间
+                    float usedHeight = (subjectY - rowY) + font22.Height + subjectToCountSpacing + font30.Height;
+                    float availableForList = rowHeight - usedHeight - countToListSpacing;
+                    if (availableForList < listVerticalPadding * 2) availableForList = listVerticalPadding * 2;
 
-                    float listAreaHeight = availableForList - listVerticalPadding * 2; // 实际绘制文本的高度
-                    float listAreaTop = rowY + usedHeight + countToListSpacing + listVerticalPadding - 40; // 名单区域顶部
+                    float listAreaHeight = availableForList - listVerticalPadding * 2;
+                    float listAreaTop = rowY + usedHeight + countToListSpacing + listVerticalPadding - 40;
 
                     RectangleF textRect = new RectangleF(
                         bigRect.Left + 200,
@@ -2129,7 +2207,6 @@ namespace HomeworkViewer
                     }
                     else if (!string.IsNullOrWhiteSpace(unsubmittedText))
                     {
-                        // 有名单文字，需要分行并垂直居中
                         GraphicsState state = g.Save();
                         g.SetClip(textRect);
 
@@ -2158,10 +2235,8 @@ namespace HomeworkViewer
 
                         float lineHeight = font30.GetHeight(g);
                         float totalTextHeight = lines.Count * lineHeight;
-
-                        // 计算垂直偏移，使文本在 textRect 内居中
                         float verticalOffset = (textRect.Height - totalTextHeight) / 2;
-                        if (verticalOffset < 0) verticalOffset = 0; // 超出时不滚动，显示顶部
+                        if (verticalOffset < 0) verticalOffset = 0;
 
                         for (int j = 0; j < lines.Count; j++)
                         {
@@ -2175,7 +2250,6 @@ namespace HomeworkViewer
                     }
                     else
                     {
-                        // 无名单文字，显示提示，手动居中
                         string hint = editMode ? "点此编辑名单" : "无未交人员";
                         SizeF hintSize = g.MeasureString(hint, hintFont);
                         float hintX = textRect.Left + (textRect.Width - hintSize.Width) / 2;
@@ -2183,7 +2257,6 @@ namespace HomeworkViewer
                         g.DrawString(hint, hintFont, RED_SEMI, hintX, hintY);
                     }
 
-                    // 绘制行分隔线（最后一行不画）
                     if (i < endIndex - 1)
                         g.DrawLine(Pens.LightGray, bigRect.Left + 50, rowY + rowHeight, bigRect.Right - 50, rowY + rowHeight);
                 }
@@ -2277,7 +2350,7 @@ namespace HomeworkViewer
             BLUE_SEMI?.Dispose();
             PURPLE_SEMI?.Dispose();
             DARKORANGE_SEMI?.Dispose();
-            trayIcon?.Dispose();
+            // trayIcon?.Dispose();
             base.OnFormClosed(e);
         }
     }
