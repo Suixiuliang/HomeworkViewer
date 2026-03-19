@@ -1,1 +1,1 @@
-{"Version":"1.2.0","ReleaseType":"Stable","IsMandatory":"1","Hash":"sha256:cb1c0629e511497cbec5e703c2943289b0bccde0048200badd9d792c7b800496"}
+{"Version":"1.3.0","ReleaseType":"Stable","IsMandatory":"1","Hash":"sha256:cb1c0629e511497cbec5e703c2943289b0bccde0048200badd9d792c7b800496"}
