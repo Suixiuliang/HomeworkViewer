@@ -58,7 +58,8 @@ namespace HomeworkViewer
         private DateTime? historyDate = null;
 
         // 按钮矩形
-        private Rectangle rotateBtnRect, editBtnRect, historyBtnRect, fullscreenBtnRect, backBtnRect, leftArrowRect, rightArrowRect, settingsBtnRect, unsubmittedBtnRect;
+        private Rectangle rotateBtnRect, editBtnRect, historyBtnRect, fullscreenBtnRect, backBtnRect, leftArrowRect, rightArrowRect, settingsBtnRect, unsubmittedBtnRect, minimizeBtnRect, closeBtnRect;
+        private Rectangle expandBtnRect, collapseBtnRect;  // 收纳相关
 
         // 网格矩形
         private List<Rectangle> gridRects = new List<Rectangle>();
@@ -69,12 +70,12 @@ namespace HomeworkViewer
 
         // 颜色
         private Color TEXT_COLOR = Color.Black;
-        private readonly Brush RED_SEMI = new SolidBrush(Color.FromArgb(120, 255, 0, 0));
-        private readonly Brush ORANGE_SEMI = new SolidBrush(Color.FromArgb(120, 255, 165, 0));
-        private readonly Brush GREEN_SEMI = new SolidBrush(Color.FromArgb(120, 0, 255, 0));
-        private readonly Brush BLUE_SEMI = new SolidBrush(Color.FromArgb(120, 0, 0, 255));
-        private readonly Brush PURPLE_SEMI = new SolidBrush(Color.FromArgb(120, 128, 0, 128));
-        private readonly Brush DARKORANGE_SEMI = new SolidBrush(Color.FromArgb(120, 255, 140, 0));
+        private readonly Brush RED_SEMI = new SolidBrush(Color.FromArgb(255, 255, 0, 0));
+        private readonly Brush ORANGE_SEMI = new SolidBrush(Color.FromArgb(255, 255, 165, 0));
+        private readonly Brush GREEN_SEMI = new SolidBrush(Color.FromArgb(255, 0, 255, 0));
+        private readonly Brush BLUE_SEMI = new SolidBrush(Color.FromArgb(255, 0, 0, 255));
+        private readonly Brush PURPLE_SEMI = new SolidBrush(Color.FromArgb(255, 128, 0, 128));
+        private readonly Brush DARKORANGE_SEMI = new SolidBrush(Color.FromArgb(255, 255, 140, 0));
 
         // 缩放相关
         private float scaleFactor = 1.0f;
@@ -92,10 +93,6 @@ namespace HomeworkViewer
         private float[] fontScales = { 0.8f, 1.0f, 1.2f };
         private string[] currentSubjects;
 
-        // 托盘图标（禁用）
-        // private NotifyIcon trayIcon;
-        // private ContextMenuStrip trayMenu;
-
         // 保存最小化前的窗口大小和状态
         private Size _savedClientSize;
         private FormWindowState _savedWindowState;
@@ -108,6 +105,13 @@ namespace HomeworkViewer
         private bool _fullscreenPressed = false;
         private bool _backPressed = false;
         private bool _unsubmittedPressed = false;
+        private bool _minimizePressed = false;
+        private bool _closePressed = false;
+        private bool _expandPressed = false;
+        private bool _collapsePressed = false;
+
+        // 收纳状态
+        private bool _buttonsExpanded = false;
 
         // 模式切换下拉框
         private ComboBox modeComboBox;
@@ -142,7 +146,7 @@ namespace HomeworkViewer
         // 未交名单每页显示行数
         private const int UNSUBMITTED_ROWS_PER_PAGE = 3;
 
-        // 新增：背景效果相关
+        // 背景效果相关
         private string _currentBackgroundEffect = "Mica";
         private bool _isWin10OrAbove = false;
         private bool _sizing = false;
@@ -189,11 +193,10 @@ namespace HomeworkViewer
             this.MouseUp += OnMouseUp;
             this.MouseLeave += OnMouseLeave;
             this.Resize += OnResize;
-            this.Load += OnLoad; // 修正：确保 OnLoad 方法签名正确
+            this.Load += OnLoad;
             this.Activated += OnActivated;
             this.FormClosing += OnFormClosing;
 
-            // InitializeTrayIcon();
             InitializeModeComboBox();
 
             CheckWindowsVersion();
@@ -202,503 +205,6 @@ namespace HomeworkViewer
             CheckEveningClassStates();
         }
 
-        // 确保 OnLoad 方法签名正确
-        private void OnLoad(object sender, EventArgs e)
-        {
-            // 应用保存的背景效果（而非固定 Mica）
-            ApplyBackgroundEffect(appConfig.BackgroundEffect);
-
-            // 检查是否有待处理的更新
-            if (appConfig.UpdatePending == 1)
-            {
-                string appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-                string upgradePath = Path.Combine(appData, "HomeworkViewerUpgrader");
-                if (Directory.Exists(upgradePath))
-                {
-                    try
-                    {
-                        Directory.Delete(upgradePath, true);
-                    }
-                    catch { }
-                }
-                appConfig.UpdatePending = 0;
-                appConfig.Save();
-            }
-        }
-        // ---------- 时间提醒 ----------
-        private void CheckEveningClassStates()
-        {
-            if (appConfig.EveningClassTimes == null || appConfig.EveningClassTimes.Count == 0)
-            {
-                if (_activeEvenings.Count > 0 || _flashingEvenings.Count > 0 || _grayEvenings.Count > 0)
-                {
-                    _activeEvenings.Clear();
-                    _flashingEvenings.Clear();
-                    _grayEvenings.Clear();
-                    StopFlashingIfNeeded();
-                    Invalidate();
-                }
-                return;
-            }
-
-            DateTime now = DateTime.Now;
-            List<string> newActive = new List<string>();
-            List<string> newFlashing = new List<string>();
-            List<string> newGray = new List<string>();
-            bool newFlashingExists = false;
-
-            for (int i = 0; i < appConfig.EveningClassTimes.Count; i++)
-            {
-                var time = appConfig.EveningClassTimes[i];
-                string eveningName = $"晚修{i + 1}";
-                if (DateTime.TryParse(time.Start, out DateTime start) && DateTime.TryParse(time.End, out DateTime end))
-                {
-                    DateTime startToday = DateTime.Today.Add(start.TimeOfDay);
-                    DateTime endToday = DateTime.Today.Add(end.TimeOfDay);
-                    if (now >= startToday && now < endToday)
-                    {
-                        newActive.Add(eveningName);
-                    }
-                    else if (now >= endToday.AddMinutes(-2) && now <= endToday.AddMinutes(2))
-                    {
-                        newFlashing.Add(eveningName);
-                        newFlashingExists = true;
-                    }
-                    else if (now > endToday.AddMinutes(2))
-                    {
-                        newGray.Add(eveningName);
-                    }
-                }
-            }
-
-            bool changed = !_activeEvenings.SequenceEqual(newActive) ||
-                           !_flashingEvenings.SequenceEqual(newFlashing) ||
-                           !_grayEvenings.SequenceEqual(newGray);
-
-            if (changed)
-            {
-                _activeEvenings = newActive;
-                _flashingEvenings = newFlashing;
-                _grayEvenings = newGray;
-
-                _previousFlashingState = newFlashingExists;
-
-                if (_flashingEvenings.Count > 0 && !_debugFlashing)
-                {
-                    StartFlashing();
-                }
-                else if (_flashingEvenings.Count == 0 && !_debugFlashing)
-                {
-                    StopFlashingIfNeeded();
-                }
-                Invalidate();
-            }
-        }
-
-        private void StartFlashing()
-        {
-            if (!flashTimer.Enabled)
-            {
-                flashStartTime = DateTime.Now;
-                flashTimer.Start();
-            }
-        }
-
-        private void StopFlashingIfNeeded()
-        {
-            if (_flashingEvenings.Count == 0 && !_debugFlashing)
-            {
-                flashTimer.Stop();
-                Invalidate();
-            }
-        }
-
-        private void FlashTimer_Tick(object sender, EventArgs e)
-        {
-            if (_debugFlashing && (DateTime.Now - _debugFlashStartTime).TotalSeconds > FLASH_DURATION)
-            {
-                _debugFlashing = false;
-                StopFlashingIfNeeded();
-            }
-
-            double angle = (DateTime.Now - flashStartTime).TotalMilliseconds / 500.0;
-            flashStep = (int)((Math.Sin(angle) + 1) * 60);
-
-            _laserOffset += 0.1f;
-            if (_laserOffset >= 1f) _laserOffset -= 1f;
-
-            Invalidate();
-        }
-
-        public void StartDebugFlashing()
-        {
-            _debugFlashing = true;
-            _debugFlashStartTime = DateTime.Now;
-            StartFlashing();
-            Invalidate();
-        }
-
-        public void StopDebugFlashing()
-        {
-            _debugFlashing = false;
-            StopFlashingIfNeeded();
-        }
-
-        // ---------- 滚动 ----------
-        private void ScrollTimer_Tick(object sender, EventArgs e)
-        {
-            if (editMode) return;
-
-            bool needRedraw = false;
-            float speed = appConfig.ScrollSpeed * 0.05f;
-            float epsilon = 0.01f;
-
-            List<int> indicesToCheck = new List<int>();
-            if (rotationMode)
-            {
-                if (rotationIndex >= 0 && rotationIndex < currentSubjects.Length)
-                    indicesToCheck.Add(rotationIndex);
-            }
-            else if (unsubmittedMode)
-            {
-                // 未交名单不滚动
-            }
-            else
-            {
-                for (int i = 0; i < gridRects.Count && i < currentSubjects.Length; i++)
-                    indicesToCheck.Add(i);
-            }
-
-            foreach (int i in indicesToCheck)
-            {
-                string subject = currentSubjects[i];
-                string content = homeworkData.Subjects.ContainsKey(subject) ? homeworkData.Subjects[subject] : "";
-                if (string.IsNullOrWhiteSpace(content)) continue;
-
-                Rectangle textArea = GetContentArea(i);
-                float contentHeight = MeasureTextHeight(content, font30, textArea.Width);
-                if (contentHeight <= textArea.Height) continue;
-
-                if (!scrollOffsets.ContainsKey(i)) scrollOffsets[i] = 0f;
-                if (!scrollPaused.ContainsKey(i)) scrollPaused[i] = false;
-                if (!pauseStartTime.ContainsKey(i)) pauseStartTime[i] = DateTime.Now;
-
-                if (speed <= 0) continue;
-
-                if (scrollPaused[i])
-                {
-                    if ((DateTime.Now - pauseStartTime[i]).TotalSeconds >= SCROLL_PAUSE_SECONDS)
-                    {
-                        if (scrollOffsets[i] >= contentHeight - textArea.Height - epsilon)
-                        {
-                            scrollOffsets[i] = 0f;
-                            pauseStartTime[i] = DateTime.Now;
-                        }
-                        else
-                        {
-                            scrollPaused[i] = false;
-                            scrollOffsets[i] = speed;
-                        }
-                    }
-                }
-                else
-                {
-                    if (scrollOffsets[i] <= epsilon)
-                    {
-                        scrollPaused[i] = true;
-                        pauseStartTime[i] = DateTime.Now;
-                    }
-                    else
-                    {
-                        scrollOffsets[i] += speed;
-                        if (scrollOffsets[i] >= contentHeight - textArea.Height - epsilon)
-                        {
-                            scrollOffsets[i] = contentHeight - textArea.Height;
-                            scrollPaused[i] = true;
-                            pauseStartTime[i] = DateTime.Now;
-                        }
-                    }
-                }
-                needRedraw = true;
-            }
-            if (needRedraw) Invalidate();
-        }
-
-        private float MeasureTextHeight(string text, Font font, int maxWidth)
-        {
-            using (Graphics g = this.CreateGraphics())
-            {
-                SizeF size = g.MeasureString(text, font, maxWidth);
-                return size.Height;
-            }
-        }
-
-        private Rectangle GetContentArea(int subjectIndex)
-        {
-            if (rotationMode)
-            {
-                Rectangle bigRect = new Rectangle(150, 100, 900, 475);
-                return new Rectangle(bigRect.Left + 50, bigRect.Top + 150, bigRect.Width - 100, bigRect.Height - 200);
-            }
-            else
-            {
-                return new Rectangle(
-                    gridRects[subjectIndex].Left + 10,
-                    gridRects[subjectIndex].Top + 60,
-                    gridRects[subjectIndex].Width - 20,
-                    gridRects[subjectIndex].Height - 70);
-            }
-        }
-
-        // ---------- 编辑模式属性 ----------
-        private bool EditMode
-        {
-            get { return editMode; }
-            set
-            {
-                if (editMode != value)
-                {
-                    editMode = value;
-                    if (editMode)
-                    {
-                        if (!unsubmittedMode)
-                        {
-                            CreateTimeComboBoxes();
-                        }
-                        // 重置滚动状态
-                        scrollOffsets.Clear();
-                        scrollPaused.Clear();
-                        pauseStartTime.Clear();
-                    }
-                    else
-                    {
-                        DestroyTimeComboBoxes();
-                        if (editingSubjectIndex != -1)
-                            FinishInlineEdit();
-                        scrollOffsets.Clear();
-                        scrollPaused.Clear();
-                        pauseStartTime.Clear();
-                    }
-                    Invalidate();
-                }
-            }
-        }
-
-        // ---------- 提交时间下拉框管理 ----------
-        private void CreateTimeComboBoxes()
-        {
-            DestroyTimeComboBoxes();
-            for (int i = 0; i < gridRects.Count && i < currentSubjects.Length; i++)
-            {
-                string subject = currentSubjects[i];
-                Rectangle virtualRect = GetDueTimeRect(i);
-                Point screenLoc = MapToScreen(virtualRect.Location);
-                Size screenSize = new Size(
-                    (int)(virtualRect.Width * scaleFactor),
-                    (int)(virtualRect.Height * scaleFactor)
-                );
-
-                string currentValue = homeworkData.DueTimes.ContainsKey(subject) ? homeworkData.DueTimes[subject] : "";
-
-                var comboBox = new ComboBox
-                {
-                    DropDownStyle = ComboBoxStyle.DropDownList,
-                    Location = screenLoc,
-                    Size = new Size(screenSize.Width, 25),
-                    Font = font22,
-                    FlatStyle = FlatStyle.Flat,
-                    BackColor = Color.FromArgb(40, 40, 40),
-                    ForeColor = Color.White,
-                    DrawMode = DrawMode.OwnerDrawFixed,
-                    Tag = i
-                };
-                List<string> items = new List<string>();
-                for (int j = 1; j <= appConfig.EveningClassCount; j++)
-                {
-                    items.Add($"晚修{j}");
-                }
-                items.Add("无");
-                comboBox.Items.AddRange(items.ToArray());
-
-                int selectedIndex = comboBox.Items.IndexOf(currentValue);
-                if (selectedIndex < 0)
-                    selectedIndex = appConfig.EveningClassCount;
-                comboBox.SelectedIndex = selectedIndex;
-
-                comboBox.DrawItem += TimeComboBox_DrawItem;
-                comboBox.SelectedIndexChanged += TimeComboBox_SelectedIndexChanged;
-
-                this.Controls.Add(comboBox);
-                timeComboBoxes.Add(comboBox);
-            }
-        }
-
-        private void DestroyTimeComboBoxes()
-        {
-            foreach (var combo in timeComboBoxes)
-            {
-                combo.SelectedIndexChanged -= TimeComboBox_SelectedIndexChanged;
-                combo.DrawItem -= TimeComboBox_DrawItem;
-                this.Controls.Remove(combo);
-                combo.Dispose();
-            }
-            timeComboBoxes.Clear();
-        }
-
-        private void TimeComboBox_DrawItem(object sender, DrawItemEventArgs e)
-        {
-            if (e.Index < 0) return;
-            ComboBox combo = sender as ComboBox;
-            string text = combo.Items[e.Index].ToString();
-
-            bool isSelected = (e.State & DrawItemState.Selected) == DrawItemState.Selected;
-            Color bgColor = isSelected ? Color.FromArgb(80, 80, 80) : Color.FromArgb(40, 40, 40);
-            using (SolidBrush bgBrush = new SolidBrush(bgColor))
-            {
-                e.Graphics.FillRectangle(bgBrush, e.Bounds);
-            }
-
-            using (SolidBrush textBrush = new SolidBrush(Color.White))
-            {
-                e.Graphics.DrawString(text, combo.Font, textBrush, e.Bounds.Left + 5, e.Bounds.Top + 2);
-            }
-
-            e.DrawFocusRectangle();
-        }
-
-        private void TimeComboBox_SelectedIndexChanged(object sender, EventArgs e)
-        {
-            ComboBox combo = sender as ComboBox;
-            if (combo == null) return;
-            int subjectIndex = (int)combo.Tag;
-            string subject = currentSubjects[subjectIndex];
-            string newValue = combo.SelectedItem?.ToString() ?? "";
-            homeworkData.DueTimes[subject] = newValue;
-            SaveHomeworkData();
-        }
-
-        // ---------- 初始化托盘图标 ---------- 
-        // private void InitializeTrayIcon()
-        // {
-        //     trayMenu = new ContextMenuStrip();
-        //     trayMenu.Items.Add("显示", null, (s, e) => ShowWindow());
-        //     trayMenu.Items.Add("退出", null, (s, e) => ExitApplication());
-
-        //     trayIcon = new NotifyIcon
-        //     {
-        //         ContextMenuStrip = trayMenu,
-        //         Visible = true,
-        //         Text = "作业展板"
-        //     };
-
-        //     string iconPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Slide", "icon.ico");
-        //     if (File.Exists(iconPath))
-        //     {
-        //         trayIcon.Icon = new Icon(iconPath);
-        //     }
-        //     else
-        //     {
-        //         trayIcon.Icon = SystemIcons.Application;
-        //     }
-
-        //     trayIcon.MouseDoubleClick += (s, e) =>
-        //     {
-        //         if (e.Button == MouseButtons.Left)
-        //             ShowWindow();
-        //     };
-        // }
-
-        // private void ShowWindow()
-        // {
-        //     this.Show();
-        //     if (_savedClientSize != Size.Empty)
-        //     {
-        //         this.ClientSize = _savedClientSize;
-        //     }
-        //     this.WindowState = _savedWindowState != FormWindowState.Minimized ? _savedWindowState : FormWindowState.Normal;
-        //     UpdateScale();
-        //     Invalidate();
-        //     this.Activate();
-        // }
-
-        // private void ExitApplication()
-        // {
-        //     trayIcon.Visible = false;
-        //     trayIcon.Dispose();
-        //     Application.Exit();
-        // }
-
-        private void OnFormClosing(object sender, FormClosingEventArgs e)
-        {
-            // 不再取消关闭，允许直接退出
-            // 清理资源（可选）
-            // 禁用
-        }
-
-        // ---------- 公开方法供设置窗体调用 ----------
-        public AppConfig GetConfig() => appConfig;
-
-        public void ApplySettings(AppConfig newConfig)
-        {
-            appConfig = newConfig;
-            ApplyFontSettings();
-            UpdateSubjectsByMode();
-            _backgroundAlpha = (int)(appConfig.BackgroundOpacity / 100f * 255);
-            CheckEveningClassStates();
-            if (EditMode)
-            {
-                CreateTimeComboBoxes();
-            }
-            ApplyBackgroundEffect(appConfig.BackgroundEffect);
-            Invalidate();
-        }
-
-        private void ApplyFontSettings()
-        {
-            font12?.Dispose();
-            font20?.Dispose();
-            font24?.Dispose();
-            font30?.Dispose();
-            font22?.Dispose();
-            font36?.Dispose();
-            hintFont?.Dispose();
-            buttonFont?.Dispose();
-            fontSmall?.Dispose();
-
-            float scale = fontScales[appConfig.FontSizeLevel];
-            string fontName = "微软雅黑";
-
-            font12 = new Font(fontName, 10 * scale);
-            font20 = new Font(fontName, 15 * scale);
-            font24 = new Font(fontName, 14 * scale);
-            font30 = new Font(fontName, 20 * scale);
-            font22 = new Font(fontName, 21 * scale, FontStyle.Bold);
-            font36 = new Font(fontName, 35 * scale);
-            hintFont = new Font(fontName, 15 * scale);
-            buttonFont = new Font(fontName, 10 * scale);
-            fontSmall = new Font(fontName, 8 * scale);
-
-            TEXT_COLOR = appConfig.FontColorWhite ? Color.White : Color.Black;
-        }
-
-        private void UpdateSubjectsByMode()
-        {
-            var subjectModes = new Dictionary<string, string[]>
-            {
-                {"大理", new[]{"语文","数学","英语","物理","化学","生物"}},
-                {"中理", new[]{"语文","数学","英语","物理","化学","地理"}},
-                {"小理", new[]{"语文","数学","英语","物理","化学","政治"}},
-                {"大文", new[]{"语文","数学","英语","政治","历史","地理"}},
-                {"全科", new[]{"语文","数学","英语","物理","化学","生物","政治","历史","地理"}}
-            };
-            if (subjectModes.ContainsKey(appConfig.LastMode))
-                currentSubjects = subjectModes[appConfig.LastMode];
-            else
-                currentSubjects = subjectModes["大理"];
-            CalculateGridRects();
-        }
-
-        // ---------- 背景效果 ----------
         private void CheckWindowsVersion()
         {
             OperatingSystem os = Environment.OSVersion;
@@ -815,6 +321,144 @@ namespace HomeworkViewer
             EnableAcrylic();
         }
 
+        protected override void WndProc(ref Message m)
+        {
+            const int WM_ENTERSIZEMOVE = 0x0231;
+            const int WM_EXITSIZEMOVE = 0x0232;
+            const int WM_SYSCOMMAND = 0x0112;
+            const int SC_MAXIMIZE = 0xF030;
+            const int WM_SIZE = 0x0005;
+            const int SIZE_RESTORED = 0;
+
+            if (_isWin10OrAbove)
+            {
+                if (m.Msg == WM_ENTERSIZEMOVE)
+                {
+                    _sizing = true;
+                }
+                else if (m.Msg == WM_EXITSIZEMOVE)
+                {
+                    _sizing = false;
+                    UpdateScale();
+                    Invalidate(true);
+                }
+            }
+
+            if (m.Msg == WM_SYSCOMMAND && (int)m.WParam == SC_MAXIMIZE)
+            {
+                ToggleFullscreen();
+                return;
+            }
+
+            if (m.Msg == WM_SIZE && m.WParam.ToInt32() == SIZE_RESTORED)
+            {
+                if (_savedClientSize != Size.Empty)
+                {
+                    this.ClientSize = _savedClientSize;
+                }
+                UpdateScale();
+                if (!_sizing)
+                {
+                    Invalidate();
+                }
+                if (!_micaEnabled)
+                {
+                    ApplyBackgroundEffect(_currentBackgroundEffect);
+                }
+            }
+
+            base.WndProc(ref m);
+        }
+
+        private void OnResize(object sender, EventArgs e)
+        {
+            if (this.WindowState == FormWindowState.Minimized)
+            {
+                _savedClientSize = this.ClientSize;
+                _savedWindowState = this.WindowState;
+                return;
+            }
+
+            if (_resizing || fullscreen || WindowState == FormWindowState.Maximized) return;
+
+            _resizing = true;
+            float targetRatio = (float)VIRTUAL_SIZE.Width / VIRTUAL_SIZE.Height;
+            int newWidth = this.ClientSize.Width;
+            int newHeight = (int)(newWidth / targetRatio);
+            this.ClientSize = new Size(newWidth, newHeight);
+            _resizing = false;
+
+            UpdateScale();
+            if (EditMode && !unsubmittedMode)
+            {
+                CreateTimeComboBoxes();
+            }
+            if (!_isWin10OrAbove || !_sizing)
+            {
+                Invalidate();
+            }
+        }
+
+        public void ApplySettings(AppConfig newConfig)
+        {
+            appConfig = newConfig;
+            ApplyFontSettings();
+            UpdateSubjectsByMode();
+            _backgroundAlpha = (int)(appConfig.BackgroundOpacity / 100f * 255);
+            CheckEveningClassStates();
+            if (EditMode)
+            {
+                CreateTimeComboBoxes();
+            }
+            ApplyBackgroundEffect(appConfig.BackgroundEffect);
+            Invalidate();
+        }
+
+        private void ApplyFontSettings()
+        {
+            font12?.Dispose();
+            font20?.Dispose();
+            font24?.Dispose();
+            font30?.Dispose();
+            font22?.Dispose();
+            font36?.Dispose();
+            hintFont?.Dispose();
+            buttonFont?.Dispose();
+            fontSmall?.Dispose();
+
+            float scale = fontScales[appConfig.FontSizeLevel];
+            string fontName = "微软雅黑";
+
+            font12 = new Font(fontName, 10 * scale);
+            font20 = new Font(fontName, 15 * scale);
+            font24 = new Font(fontName, 14 * scale);
+            font30 = new Font(fontName, 20 * scale);
+            font22 = new Font(fontName, 21 * scale, FontStyle.Bold);
+            font36 = new Font(fontName, 35 * scale);
+            hintFont = new Font(fontName, 15 * scale);
+            buttonFont = new Font(fontName, 10 * scale);
+            fontSmall = new Font(fontName, 8 * scale);
+
+            TEXT_COLOR = appConfig.FontColorWhite ? Color.White : Color.Black;
+        }
+
+        private void UpdateSubjectsByMode()
+        {
+            var subjectModes = new Dictionary<string, string[]>
+            {
+                {"大理", new[]{"语文","数学","英语","物理","化学","生物"}},
+                {"中理", new[]{"语文","数学","英语","物理","化学","地理"}},
+                {"小理", new[]{"语文","数学","英语","物理","化学","政治"}},
+                {"大文", new[]{"语文","数学","英语","政治","历史","地理"}},
+                {"全科", new[]{"语文","数学","英语","物理","化学","生物","政治","历史","地理"}}
+            };
+            if (subjectModes.ContainsKey(appConfig.LastMode))
+                currentSubjects = subjectModes[appConfig.LastMode];
+            else
+                currentSubjects = subjectModes["大理"];
+            CalculateGridRects();
+        }
+
         // ---------- Mica API ----------
         private const int DWMWA_USE_IMMERSIVE_DARK_MODE = 20;
         private const int DWMWA_MICA = 1029;
@@ -885,6 +529,8 @@ namespace HomeworkViewer
         private void LoadHomeworkData(DateTime date)
         {
             homeworkData = HomeworkData.Load(date);
+            
+            // 如果是新日期（没有作业数据），自动设置默认提交时间为“晚修3”
             if (homeworkData.DueTimes.Count == 0)
             {
                 foreach (string subject in currentSubjects)
@@ -893,7 +539,10 @@ namespace HomeworkViewer
                     string defaultDue = appConfig.EveningClassCount >= 3 ? "晚修3" : "无";
                     homeworkData.DueTimes[subject] = defaultDue;
                 }
+                // 立即保存，避免下次加载时重复设置
+                SaveHomeworkData();
             }
+            
             if (EditMode && !unsubmittedMode)
             {
                 CreateTimeComboBoxes();
@@ -960,7 +609,7 @@ namespace HomeworkViewer
             Point virtualPos = MapToVirtual(e.Location);
             int x = virtualPos.X, y = virtualPos.Y;
 
-            _settingsPressed = _rotatePressed = _editPressed = _historyPressed = _fullscreenPressed = _backPressed = _unsubmittedPressed = false;
+            _settingsPressed = _rotatePressed = _editPressed = _historyPressed = _fullscreenPressed = _backPressed = _unsubmittedPressed = _minimizePressed = _closePressed = _expandPressed = _collapsePressed = false;
 
             if (rotationMode || unsubmittedMode)
             {
@@ -975,118 +624,56 @@ namespace HomeworkViewer
             }
             else
             {
-                if (settingsBtnRect.Contains(x, y))
-                    _settingsPressed = true;
-                else if (rotateBtnRect.Contains(x, y))
-                    _rotatePressed = true;
-                else if (unsubmittedBtnRect.Contains(x, y))
-                    _unsubmittedPressed = true;
-                else if (editBtnRect.Contains(x, y))
-                    _editPressed = true;
-                else if (historyBtnRect.Contains(x, y))
-                    _historyPressed = true;
-                else if (fullscreenBtnRect.Contains(x, y))
-                    _fullscreenPressed = true;
+                if (!_buttonsExpanded)
+                {
+                    if (expandBtnRect.Contains(x, y))
+                        _expandPressed = true;
+                    else if (editBtnRect.Contains(x, y))
+                        _editPressed = true;
+                    else if (fullscreenBtnRect.Contains(x, y))
+                        _fullscreenPressed = true;
+                }
+                else
+                {
+                    if (collapseBtnRect.Contains(x, y))
+                        _collapsePressed = true;
+                    else if (settingsBtnRect.Contains(x, y))
+                        _settingsPressed = true;
+                    else if (rotateBtnRect.Contains(x, y))
+                        _rotatePressed = true;
+                    else if (unsubmittedBtnRect.Contains(x, y))
+                        _unsubmittedPressed = true;
+                    else if (editBtnRect.Contains(x, y))
+                        _editPressed = true;
+                    else if (historyBtnRect.Contains(x, y))
+                        _historyPressed = true;
+                    else if (fullscreenBtnRect.Contains(x, y))
+                        _fullscreenPressed = true;
+                    else if (minimizeBtnRect.Contains(x, y))
+                        _minimizePressed = true;
+                    else if (closeBtnRect.Contains(x, y))
+                        _closePressed = true;
+                }
             }
             Invalidate();
         }
 
         private void OnMouseUp(object sender, MouseEventArgs e)
         {
-            _settingsPressed = _rotatePressed = _editPressed = _historyPressed = _fullscreenPressed = _backPressed = _unsubmittedPressed = false;
+            _settingsPressed = _rotatePressed = _editPressed = _historyPressed = _fullscreenPressed = _backPressed = _unsubmittedPressed = _minimizePressed = _closePressed = _expandPressed = _collapsePressed = false;
             Invalidate();
         }
 
         private void OnMouseLeave(object sender, EventArgs e)
         {
-            _settingsPressed = _rotatePressed = _editPressed = _historyPressed = _fullscreenPressed = _backPressed = _unsubmittedPressed = false;
+            _settingsPressed = _rotatePressed = _editPressed = _historyPressed = _fullscreenPressed = _backPressed = _unsubmittedPressed = _minimizePressed = _closePressed = _expandPressed = _collapsePressed = false;
             Invalidate();
-        }
-
-        private void OnResize(object sender, EventArgs e)
-        {
-            if (this.WindowState == FormWindowState.Minimized)
-            {
-                _savedClientSize = this.ClientSize;
-                _savedWindowState = this.WindowState;
-                // 注意：不要 Hide()，也不要显示托盘提示
-                return; // 直接返回，不执行后续缩放逻辑
-            }
-
-            // 以下原有缩放逻辑保持不变
-            if (_resizing || fullscreen || WindowState == FormWindowState.Maximized) return;
-
-            _resizing = true;
-            float targetRatio = (float)VIRTUAL_SIZE.Width / VIRTUAL_SIZE.Height;
-            int newWidth = this.ClientSize.Width;
-            int newHeight = (int)(newWidth / targetRatio);
-            this.ClientSize = new Size(newWidth, newHeight);
-            _resizing = false;
-
-            UpdateScale();
-            if (EditMode && !unsubmittedMode)
-            {
-                CreateTimeComboBoxes();
-            }
-            if (!_isWin10OrAbove || !_sizing)
-            {
-                Invalidate();
-            }
         }
 
         private void OnActivated(object sender, EventArgs e)
         {
             UpdateScale();
             Invalidate();
-        }
-
-        protected override void WndProc(ref Message m)
-        {
-            const int WM_ENTERSIZEMOVE = 0x0231;
-            const int WM_EXITSIZEMOVE = 0x0232;
-            const int WM_SYSCOMMAND = 0x0112;
-            const int SC_MAXIMIZE = 0xF030;
-            const int WM_SIZE = 0x0005;
-            const int SIZE_RESTORED = 0;
-
-            if (_isWin10OrAbove)
-            {
-                if (m.Msg == WM_ENTERSIZEMOVE)
-                {
-                    _sizing = true;
-                }
-                else if (m.Msg == WM_EXITSIZEMOVE)
-                {
-                    _sizing = false;
-                    UpdateScale();
-                    Invalidate(true);
-                }
-            }
-
-            if (m.Msg == WM_SYSCOMMAND && (int)m.WParam == SC_MAXIMIZE)
-            {
-                ToggleFullscreen();
-                return;
-            }
-
-            if (m.Msg == WM_SIZE && m.WParam.ToInt32() == SIZE_RESTORED)
-            {
-                if (_savedClientSize != Size.Empty)
-                {
-                    this.ClientSize = _savedClientSize;
-                }
-                UpdateScale();
-                if (!_sizing)
-                {
-                    Invalidate();
-                }
-                if (!_micaEnabled)
-                {
-                    ApplyBackgroundEffect(_currentBackgroundEffect);
-                }
-            }
-
-            base.WndProc(ref m);
         }
 
         // ---------- 辅助方法 ----------
@@ -1332,78 +919,151 @@ namespace HomeworkViewer
             }
             else
             {
-                if (settingsBtnRect.Contains(x, y))
+                // 普通模式
+                bool isWin10 = Environment.OSVersion.Version.Major == 10 && 
+                            Environment.OSVersion.Version.Minor == 0 && 
+                            Environment.OSVersion.Version.Build < 22000;
+
+                if (!_buttonsExpanded)
                 {
-                    using (var settingsForm = new SettingsForm(this))
+                    // 折叠状态
+                    if (expandBtnRect.Contains(x, y))
                     {
-                        settingsForm.ShowDialog();
-                    }
-                }
-                else if (rotateBtnRect.Contains(x, y))
-                {
-                    bool hasContent = false;
-                    foreach (var subj in currentSubjects)
-                    {
-                        if (homeworkData.Subjects.ContainsKey(subj) && !string.IsNullOrWhiteSpace(homeworkData.Subjects[subj]))
-                        { hasContent = true; break; }
-                    }
-                    if (!hasContent)
-                    {
-                        MessageBox.Show("所有科目都没有作业内容，无法进入轮播模式", "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                        _buttonsExpanded = true;
+                        Invalidate();
                         return;
                     }
-                    rotationMode = true;
-                    rotationIndex = 0;
-                    rotationTimer.Start();
-                    Invalidate();
-                }
-                else if (unsubmittedBtnRect.Contains(x, y))
-                {
-                    unsubmittedMode = true;
-                    unsubmittedPage = 0;
-                    if (EditMode)
+                    else if (editBtnRect.Contains(x, y))
                     {
-                        EditMode = false;
-                    }
-                    Invalidate();
-                }
-                else if (editBtnRect.Contains(x, y))
-                {
-                    if (EditMode)
-                    {
-                        SaveHomeworkData();
-                    }
-                    EditMode = !EditMode;
-                }
-                else if (historyBtnRect.Contains(x, y))
-                {
-                    if (historyMode)
-                    {
-                        historyMode = false;
-                        historyDate = null;
-                        LoadHomeworkData(currentDate);
-                        Invalidate();
+                        if (EditMode)
+                        {
+                            SaveHomeworkData();
+                        }
+                        EditMode = !EditMode;
+                        return;
                     }
                     else
                     {
-                        using (var dlg = new HistoryDialog())
+                        if (isWin10)
                         {
-                            if (dlg.ShowDialog(this) == DialogResult.OK && dlg.SelectedDate.HasValue)
+                            if (minimizeBtnRect.Contains(x, y))
                             {
-                                historyDate = dlg.SelectedDate.Value;
-                                LoadHomeworkData(historyDate.Value);
-                                historyMode = true;
-                                Invalidate();
+                                this.WindowState = FormWindowState.Minimized;
+                                return;
+                            }
+                        }
+                        else
+                        {
+                            if (fullscreenBtnRect.Contains(x, y))
+                            {
+                                if (EditMode) EditMode = false;
+                                ToggleFullscreen();
+                                return;
                             }
                         }
                     }
                 }
-                else if (fullscreenBtnRect.Contains(x, y))
+                else
                 {
-                    if (EditMode) EditMode = false;
-                    ToggleFullscreen();
+                    // 展开状态
+                    if (collapseBtnRect.Contains(x, y))
+                    {
+                        _buttonsExpanded = false;
+                        Invalidate();
+                        return;
+                    }
+                    else if (settingsBtnRect.Contains(x, y))
+                    {
+                        using (var settingsForm = new SettingsForm(this))
+                        {
+                            settingsForm.ShowDialog();
+                        }
+                        return;
+                    }
+                    else if (rotateBtnRect.Contains(x, y))
+                    {
+                        bool hasContent = false;
+                        foreach (var subj in currentSubjects)
+                        {
+                            if (homeworkData.Subjects.ContainsKey(subj) && !string.IsNullOrWhiteSpace(homeworkData.Subjects[subj]))
+                            { hasContent = true; break; }
+                        }
+                        if (!hasContent)
+                        {
+                            MessageBox.Show("所有科目都没有作业内容，无法进入轮播模式", "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                            return;
+                        }
+                        rotationMode = true;
+                        rotationIndex = 0;
+                        rotationTimer.Start();
+                        Invalidate();
+                        return;
+                    }
+                    else if (unsubmittedBtnRect.Contains(x, y))
+                    {
+                        unsubmittedMode = true;
+                        unsubmittedPage = 0;
+                        if (EditMode)
+                        {
+                            EditMode = false;
+                        }
+                        Invalidate();
+                        return;
+                    }
+                    else if (editBtnRect.Contains(x, y))
+                    {
+                        if (EditMode)
+                        {
+                            SaveHomeworkData();
+                        }
+                        EditMode = !EditMode;
+                        return;
+                    }
+                    else if (historyBtnRect.Contains(x, y))
+                    {
+                        if (historyMode)
+                        {
+                            historyMode = false;
+                            historyDate = null;
+                            LoadHomeworkData(currentDate);
+                            Invalidate();
+                        }
+                        else
+                        {
+                            using (var dlg = new HistoryDialog())
+                            {
+                                if (dlg.ShowDialog(this) == DialogResult.OK && dlg.SelectedDate.HasValue)
+                                {
+                                    historyDate = dlg.SelectedDate.Value;
+                                    LoadHomeworkData(historyDate.Value);
+                                    historyMode = true;
+                                    Invalidate();
+                                }
+                            }
+                        }
+                        return;
+                    }
+                    else if (minimizeBtnRect.Contains(x, y))
+                    {
+                        this.WindowState = FormWindowState.Minimized;
+                        return;
+                    }
+                    else if (closeBtnRect.Contains(x, y))
+                    {
+                        Application.Exit();
+                        return;
+                    }
+                    else if (isWin10 == false && fullscreenBtnRect.Contains(x, y))
+                    {
+                        // Win11 下才有全屏/缩小按钮
+                        if (EditMode) EditMode = false;
+                        ToggleFullscreen();
+                        return;
+                    }
                 }
-                else if (EditMode && !rotationMode && !unsubmittedMode)
+
+                // 处理编辑区域（卡片内容）
+                if (EditMode && !rotationMode && !unsubmittedMode)
                 {
                     for (int i = 0; i < gridRects.Count && i < currentSubjects.Length; i++)
                     {
@@ -1446,14 +1106,25 @@ namespace HomeworkViewer
             else if (fieldType == EditFieldType.Unsubmitted)
                 currentText = homeworkData.Unsubmitted.ContainsKey(subject) ? homeworkData.Unsubmitted[subject] : "";
 
+            // 根据当前字体级别和全屏状态确定内联编辑字体
+            Font editFont = font30; // 默认
+            if (fullscreen)
+            {
+                int newLevel = appConfig.FontSizeLevel + 1;
+                if (newLevel > 2) newLevel = 2; // 最大级别为2（大）
+                float scale = fontScales[newLevel];
+                editFont = new Font("微软雅黑", 20 * scale); // 与 font30 的构造一致，但使用大一级的 scale
+            }
+
             var textBox = new TextBox
             {
                 Multiline = true,
+                WordWrap = true,
                 ScrollBars = ScrollBars.Vertical,
                 Location = screenLoc,
                 Size = screenSize,
                 Text = currentText,
-                Font = font30,
+                Font = editFont,  // 使用动态计算的字体
                 BorderStyle = BorderStyle.FixedSingle,
                 BackColor = Color.FromArgb(40, 40, 40),
                 ForeColor = Color.White
@@ -1583,7 +1254,7 @@ namespace HomeworkViewer
                 rightArrowImage.RotateFlip(RotateFlipType.RotateNoneFlipX);
             }
 
-            string[] iconNames = { "编辑", "返回", "记录", "轮换", "全屏", "设置", "缩小", "完成", "未交人员" };
+            string[] iconNames = { "编辑", "返回", "记录", "轮换", "全屏", "设置", "缩小", "完成", "未交人员", "关闭", "最小化", "展开", "收起" };
             int iconSize = (int)(BTN_SQUARE_SIZE * 0.6);
             foreach (string name in iconNames)
             {
@@ -1729,6 +1400,7 @@ namespace HomeworkViewer
 
             g.ResetTransform();
         }
+
         private void DrawDateInfo(Graphics g, Rectangle barRect)
         {
             DateTime now = historyMode && historyDate.HasValue ? historyDate.Value : currentDate;
@@ -1766,9 +1438,9 @@ namespace HomeworkViewer
         {
             if (rotationMode || unsubmittedMode)
             {
+                // 轮播或未交模式：返回按钮 + 右上角三个按钮（编辑、记录、全屏）
                 int backY = barRect.Top + (barRect.Height - BTN_SQUARE_SIZE) / 2;
                 backBtnRect = new Rectangle(35, backY, BTN_SQUARE_SIZE, BTN_SQUARE_SIZE);
-
                 DrawTransparentButton(g, backBtnRect, "返回", buttonIcons.ContainsKey("返回") ? buttonIcons["返回"] : null, ref backBtnRect, backBtnRect.Location, _backPressed);
 
                 int btnY = barRect.Top + (barRect.Height - BTN_SQUARE_SIZE) / 2;
@@ -1789,6 +1461,7 @@ namespace HomeworkViewer
                 string fullscreenIconKey = fullscreen ? "缩小" : "全屏";
                 DrawTransparentButton(g, fullscreenBtnRect, fullscreen ? "缩小" : "全屏", buttonIcons.ContainsKey(fullscreenIconKey) ? buttonIcons[fullscreenIconKey] : null, ref fullscreenBtnRect, fullscreenPos, _fullscreenPressed);
 
+                // 左右箭头（分页）
                 if (unsubmittedMode)
                 {
                     int totalPages = (currentSubjects.Length + UNSUBMITTED_ROWS_PER_PAGE - 1) / UNSUBMITTED_ROWS_PER_PAGE;
@@ -1850,23 +1523,86 @@ namespace HomeworkViewer
             }
             else
             {
+                bool isWin10 = Environment.OSVersion.Version.Major == 10 && Environment.OSVersion.Version.Minor == 0 && Environment.OSVersion.Version.Build < 22000;
                 int btnY = barRect.Top + (barRect.Height - BTN_SQUARE_SIZE) / 2;
-                int totalButtonsWidth = 6 * BTN_SQUARE_SIZE + 5 * 10;
-                int startX = barRect.Right - totalButtonsWidth - 20;
 
-                Point settingsPos = new Point(startX, btnY);
-                Point rotatePos = new Point(settingsPos.X + BTN_SQUARE_SIZE + 10, btnY);
-                Point unsubmittedPos = new Point(rotatePos.X + BTN_SQUARE_SIZE + 10, btnY);
-                Point editPos = new Point(unsubmittedPos.X + BTN_SQUARE_SIZE + 10, btnY);
-                Point historyPos = new Point(editPos.X + BTN_SQUARE_SIZE + 10, btnY);
-                Point fullscreenPos = new Point(historyPos.X + BTN_SQUARE_SIZE + 10, btnY);
+                if (!_buttonsExpanded)
+                {
+                    // 折叠状态：三个按钮
+                    int totalButtonsWidth = 3 * BTN_SQUARE_SIZE + 2 * 10;
+                    int startX = barRect.Right - totalButtonsWidth - 20;
 
-                DrawTransparentButton(g, settingsBtnRect, "设置", buttonIcons.ContainsKey("设置") ? buttonIcons["设置"] : null, ref settingsBtnRect, settingsPos, _settingsPressed);
-                DrawTransparentButton(g, rotateBtnRect, "轮换", buttonIcons.ContainsKey("轮换") ? buttonIcons["轮换"] : null, ref rotateBtnRect, rotatePos, _rotatePressed);
-                DrawTransparentButton(g, unsubmittedBtnRect, "未交", buttonIcons.ContainsKey("未交人员") ? buttonIcons["未交人员"] : null, ref unsubmittedBtnRect, unsubmittedPos, _unsubmittedPressed);
-                DrawTransparentButton(g, editBtnRect, editMode ? "完成" : "编辑", buttonIcons.ContainsKey(editMode ? "完成" : "编辑") ? buttonIcons[editMode ? "完成" : "编辑"] : null, ref editBtnRect, editPos, _editPressed);
-                DrawTransparentButton(g, historyBtnRect, historyMode ? "返回" : "记录", buttonIcons.ContainsKey(historyMode ? "返回" : "记录") ? buttonIcons[historyMode ? "返回" : "记录"] : null, ref historyBtnRect, historyPos, _historyPressed);
-                DrawTransparentButton(g, fullscreenBtnRect, fullscreen ? "缩小" : "全屏", buttonIcons.ContainsKey(fullscreen ? "缩小" : "全屏") ? buttonIcons[fullscreen ? "缩小" : "全屏"] : null, ref fullscreenBtnRect, fullscreenPos, _fullscreenPressed);
+                    Point expandPos = new Point(startX, btnY);
+                    Point editPos = new Point(expandPos.X + BTN_SQUARE_SIZE + 10, btnY);
+                    Point thirdPos = new Point(editPos.X + BTN_SQUARE_SIZE + 10, btnY);
+
+                    DrawTransparentButton(g, expandBtnRect, "展开", buttonIcons.ContainsKey("展开") ? buttonIcons["展开"] : null, ref expandBtnRect, expandPos, _expandPressed);
+                    DrawTransparentButton(g, editBtnRect, editMode ? "完成" : "编辑", buttonIcons.ContainsKey(editMode ? "完成" : "编辑") ? buttonIcons[editMode ? "完成" : "编辑"] : null, ref editBtnRect, editPos, _editPressed);
+
+                    if (isWin10)
+                    {
+                        DrawTransparentButton(g, minimizeBtnRect, "最小化", buttonIcons.ContainsKey("最小化") ? buttonIcons["最小化"] : null, ref minimizeBtnRect, thirdPos, _minimizePressed);
+                    }
+                    else
+                    {
+                        string fullscreenIconKey = fullscreen ? "缩小" : "全屏";
+                        DrawTransparentButton(g, fullscreenBtnRect, fullscreen ? "缩小" : "全屏", buttonIcons.ContainsKey(fullscreenIconKey) ? buttonIcons[fullscreenIconKey] : null, ref fullscreenBtnRect, thirdPos, _fullscreenPressed);
+                    }
+                }
+                else
+                {
+                    // 展开状态
+                    if (isWin10)
+                    {
+                        // 8个按钮：收起 + 7个功能
+                        int totalButtonsWidth = 8 * BTN_SQUARE_SIZE + 7 * 10;
+                        int startX = barRect.Right - totalButtonsWidth - 20;
+
+                        Point collapsePos = new Point(startX, btnY);
+                        Point settingsPos = new Point(collapsePos.X + BTN_SQUARE_SIZE + 10, btnY);
+                        Point rotatePos = new Point(settingsPos.X + BTN_SQUARE_SIZE + 10, btnY);
+                        Point unsubmittedPos = new Point(rotatePos.X + BTN_SQUARE_SIZE + 10, btnY);
+                        Point editPos = new Point(unsubmittedPos.X + BTN_SQUARE_SIZE + 10, btnY);
+                        Point historyPos = new Point(editPos.X + BTN_SQUARE_SIZE + 10, btnY);
+                        Point minimizePos = new Point(historyPos.X + BTN_SQUARE_SIZE + 10, btnY);
+                        Point closePos = new Point(minimizePos.X + BTN_SQUARE_SIZE + 10, btnY);
+
+                        DrawTransparentButton(g, collapseBtnRect, "收起", buttonIcons.ContainsKey("收起") ? buttonIcons["收起"] : null, ref collapseBtnRect, collapsePos, _collapsePressed);
+                        DrawTransparentButton(g, settingsBtnRect, "设置", buttonIcons.ContainsKey("设置") ? buttonIcons["设置"] : null, ref settingsBtnRect, settingsPos, _settingsPressed);
+                        DrawTransparentButton(g, rotateBtnRect, "轮换", buttonIcons.ContainsKey("轮换") ? buttonIcons["轮换"] : null, ref rotateBtnRect, rotatePos, _rotatePressed);
+                        DrawTransparentButton(g, unsubmittedBtnRect, "未交", buttonIcons.ContainsKey("未交人员") ? buttonIcons["未交人员"] : null, ref unsubmittedBtnRect, unsubmittedPos, _unsubmittedPressed);
+                        DrawTransparentButton(g, editBtnRect, editMode ? "完成" : "编辑", buttonIcons.ContainsKey(editMode ? "完成" : "编辑") ? buttonIcons[editMode ? "完成" : "编辑"] : null, ref editBtnRect, editPos, _editPressed);
+                        DrawTransparentButton(g, historyBtnRect, historyMode ? "返回" : "记录", buttonIcons.ContainsKey(historyMode ? "返回" : "记录") ? buttonIcons[historyMode ? "返回" : "记录"] : null, ref historyBtnRect, historyPos, _historyPressed);
+                        DrawTransparentButton(g, minimizeBtnRect, "最小化", buttonIcons.ContainsKey("最小化") ? buttonIcons["最小化"] : null, ref minimizeBtnRect, minimizePos, _minimizePressed);
+                        DrawTransparentButton(g, closeBtnRect, "关闭", buttonIcons.ContainsKey("关闭") ? buttonIcons["关闭"] : null, ref closeBtnRect, closePos, _closePressed);
+                    }
+                    else
+                    {
+                        // 9个按钮：收起 + 8个功能
+                        int totalButtonsWidth = 9 * BTN_SQUARE_SIZE + 8 * 10;
+                        int startX = barRect.Right - totalButtonsWidth - 20;
+
+                        Point collapsePos = new Point(startX, btnY);
+                        Point settingsPos = new Point(collapsePos.X + BTN_SQUARE_SIZE + 10, btnY);
+                        Point rotatePos = new Point(settingsPos.X + BTN_SQUARE_SIZE + 10, btnY);
+                        Point unsubmittedPos = new Point(rotatePos.X + BTN_SQUARE_SIZE + 10, btnY);
+                        Point editPos = new Point(unsubmittedPos.X + BTN_SQUARE_SIZE + 10, btnY);
+                        Point historyPos = new Point(editPos.X + BTN_SQUARE_SIZE + 10, btnY);
+                        Point fullscreenPos = new Point(historyPos.X + BTN_SQUARE_SIZE + 10, btnY);
+                        Point minimizePos = new Point(fullscreenPos.X + BTN_SQUARE_SIZE + 10, btnY);
+                        Point closePos = new Point(minimizePos.X + BTN_SQUARE_SIZE + 10, btnY);
+
+                        DrawTransparentButton(g, collapseBtnRect, "收起", buttonIcons.ContainsKey("收起") ? buttonIcons["收起"] : null, ref collapseBtnRect, collapsePos, _collapsePressed);
+                        DrawTransparentButton(g, settingsBtnRect, "设置", buttonIcons.ContainsKey("设置") ? buttonIcons["设置"] : null, ref settingsBtnRect, settingsPos, _settingsPressed);
+                        DrawTransparentButton(g, rotateBtnRect, "轮换", buttonIcons.ContainsKey("轮换") ? buttonIcons["轮换"] : null, ref rotateBtnRect, rotatePos, _rotatePressed);
+                        DrawTransparentButton(g, unsubmittedBtnRect, "未交", buttonIcons.ContainsKey("未交人员") ? buttonIcons["未交人员"] : null, ref unsubmittedBtnRect, unsubmittedPos, _unsubmittedPressed);
+                        DrawTransparentButton(g, editBtnRect, editMode ? "完成" : "编辑", buttonIcons.ContainsKey(editMode ? "完成" : "编辑") ? buttonIcons[editMode ? "完成" : "编辑"] : null, ref editBtnRect, editPos, _editPressed);
+                        DrawTransparentButton(g, historyBtnRect, historyMode ? "返回" : "记录", buttonIcons.ContainsKey(historyMode ? "返回" : "记录") ? buttonIcons[historyMode ? "返回" : "记录"] : null, ref historyBtnRect, historyPos, _historyPressed);
+                        DrawTransparentButton(g, fullscreenBtnRect, fullscreen ? "缩小" : "全屏", buttonIcons.ContainsKey(fullscreen ? "缩小" : "全屏") ? buttonIcons[fullscreen ? "缩小" : "全屏"] : null, ref fullscreenBtnRect, fullscreenPos, _fullscreenPressed);
+                        DrawTransparentButton(g, minimizeBtnRect, "最小化", buttonIcons.ContainsKey("最小化") ? buttonIcons["最小化"] : null, ref minimizeBtnRect, minimizePos, _minimizePressed);
+                        DrawTransparentButton(g, closeBtnRect, "关闭", buttonIcons.ContainsKey("关闭") ? buttonIcons["关闭"] : null, ref closeBtnRect, closePos, _closePressed);
+                    }
+                }
             }
         }
 
@@ -2279,6 +2015,7 @@ namespace HomeworkViewer
             }
         }
 
+        // ---------- 改进的文本绘制（支持换行和滚动） ----------
         private void DrawTextInArea(Graphics g, string text, Rectangle area, Font font, bool center = false, float scrollOffset = 0f)
         {
             List<string> lines = new List<string>();
@@ -2286,6 +2023,7 @@ namespace HomeworkViewer
             foreach (string para in paragraphs)
             {
                 if (string.IsNullOrEmpty(para)) continue;
+                // 先按空格分词
                 string[] words = para.Split(' ');
                 string line = "";
                 foreach (string word in words)
@@ -2297,11 +2035,32 @@ namespace HomeworkViewer
                     }
                     else
                     {
-                        if (line != "") lines.Add(line);
-                        line = word;
+                        if (!string.IsNullOrEmpty(line))
+                            lines.Add(line);
+                        // 如果单个单词仍然超宽，则按字符拆分
+                        if (g.MeasureString(word, font).Width > area.Width)
+                        {
+                            string remaining = word;
+                            while (remaining.Length > 0)
+                            {
+                                int take = 1;
+                                while (take < remaining.Length && g.MeasureString(remaining.Substring(0, take), font).Width <= area.Width)
+                                    take++;
+                                while (take > 0 && g.MeasureString(remaining.Substring(0, take), font).Width > area.Width)
+                                    take--;
+                                if (take == 0) take = 1;
+                                lines.Add(remaining.Substring(0, take));
+                                remaining = remaining.Substring(take);
+                            }
+                            line = "";
+                        }
+                        else
+                        {
+                            line = word;
+                        }
                     }
                 }
-                if (line != "") lines.Add(line);
+                if (!string.IsNullOrEmpty(line)) lines.Add(line);
             }
 
             float lineHeight = font.GetHeight(g);
@@ -2329,6 +2088,395 @@ namespace HomeworkViewer
             g.Restore(state);
         }
 
+        // ---------- 时间提醒 ----------
+        private void CheckEveningClassStates()
+        {
+            if (appConfig.EveningClassTimes == null || appConfig.EveningClassTimes.Count == 0)
+            {
+                if (_activeEvenings.Count > 0 || _flashingEvenings.Count > 0 || _grayEvenings.Count > 0)
+                {
+                    _activeEvenings.Clear();
+                    _flashingEvenings.Clear();
+                    _grayEvenings.Clear();
+                    StopFlashingIfNeeded();
+                    Invalidate();
+                }
+                return;
+            }
+
+            DateTime now = DateTime.Now;
+            List<string> newActive = new List<string>();
+            List<string> newFlashing = new List<string>();
+            List<string> newGray = new List<string>();
+            bool newFlashingExists = false;
+
+            for (int i = 0; i < appConfig.EveningClassTimes.Count; i++)
+            {
+                var time = appConfig.EveningClassTimes[i];
+                string eveningName = $"晚修{i + 1}";
+                if (DateTime.TryParse(time.Start, out DateTime start) && DateTime.TryParse(time.End, out DateTime end))
+                {
+                    DateTime startToday = DateTime.Today.Add(start.TimeOfDay);
+                    DateTime endToday = DateTime.Today.Add(end.TimeOfDay);
+                    if (now >= startToday && now < endToday)
+                    {
+                        newActive.Add(eveningName);
+                    }
+                    else if (now >= endToday.AddMinutes(-2) && now <= endToday.AddMinutes(2))
+                    {
+                        newFlashing.Add(eveningName);
+                        newFlashingExists = true;
+                    }
+                    else if (now > endToday.AddMinutes(2))
+                    {
+                        newGray.Add(eveningName);
+                    }
+                }
+            }
+
+            bool changed = !_activeEvenings.SequenceEqual(newActive) ||
+                           !_flashingEvenings.SequenceEqual(newFlashing) ||
+                           !_grayEvenings.SequenceEqual(newGray);
+
+            if (changed)
+            {
+                _activeEvenings = newActive;
+                _flashingEvenings = newFlashing;
+                _grayEvenings = newGray;
+
+                _previousFlashingState = newFlashingExists;
+
+                if (_flashingEvenings.Count > 0 && !_debugFlashing)
+                {
+                    StartFlashing();
+                }
+                else if (_flashingEvenings.Count == 0 && !_debugFlashing)
+                {
+                    StopFlashingIfNeeded();
+                }
+                Invalidate();
+            }
+        }
+
+        private void StartFlashing()
+        {
+            if (!flashTimer.Enabled)
+            {
+                flashStartTime = DateTime.Now;
+                flashTimer.Start();
+            }
+        }
+
+        private void StopFlashingIfNeeded()
+        {
+            if (_flashingEvenings.Count == 0 && !_debugFlashing)
+            {
+                flashTimer.Stop();
+                Invalidate();
+            }
+        }
+
+        private void FlashTimer_Tick(object sender, EventArgs e)
+        {
+            if (_debugFlashing && (DateTime.Now - _debugFlashStartTime).TotalSeconds > FLASH_DURATION)
+            {
+                _debugFlashing = false;
+                StopFlashingIfNeeded();
+            }
+
+            double angle = (DateTime.Now - flashStartTime).TotalMilliseconds / 500.0;
+            flashStep = (int)((Math.Sin(angle) + 1) * 60);
+
+            _laserOffset += 0.1f;
+            if (_laserOffset >= 1f) _laserOffset -= 1f;
+
+            Invalidate();
+        }
+
+        public void StartDebugFlashing()
+        {
+            _debugFlashing = true;
+            _debugFlashStartTime = DateTime.Now;
+            StartFlashing();
+            Invalidate();
+        }
+
+        public void StopDebugFlashing()
+        {
+            _debugFlashing = false;
+            StopFlashingIfNeeded();
+        }
+
+        // ---------- 滚动 ----------
+        private void ScrollTimer_Tick(object sender, EventArgs e)
+        {
+            if (editMode) return;
+
+            bool needRedraw = false;
+            float speed = appConfig.ScrollSpeed * 0.05f;
+            float epsilon = 0.01f;
+
+            List<int> indicesToCheck = new List<int>();
+            if (rotationMode)
+            {
+                if (rotationIndex >= 0 && rotationIndex < currentSubjects.Length)
+                    indicesToCheck.Add(rotationIndex);
+            }
+            else if (unsubmittedMode)
+            {
+                // 未交名单不滚动
+            }
+            else
+            {
+                for (int i = 0; i < gridRects.Count && i < currentSubjects.Length; i++)
+                    indicesToCheck.Add(i);
+            }
+
+            foreach (int i in indicesToCheck)
+            {
+                string subject = currentSubjects[i];
+                string content = homeworkData.Subjects.ContainsKey(subject) ? homeworkData.Subjects[subject] : "";
+                if (string.IsNullOrWhiteSpace(content)) continue;
+
+                Rectangle textArea = GetContentArea(i);
+                float contentHeight = MeasureTextHeight(content, font30, textArea.Width);
+                if (contentHeight <= textArea.Height) continue;
+
+                if (!scrollOffsets.ContainsKey(i)) scrollOffsets[i] = 0f;
+                if (!scrollPaused.ContainsKey(i)) scrollPaused[i] = false;
+                if (!pauseStartTime.ContainsKey(i)) pauseStartTime[i] = DateTime.Now;
+
+                if (speed <= 0) continue;
+
+                if (scrollPaused[i])
+                {
+                    if ((DateTime.Now - pauseStartTime[i]).TotalSeconds >= SCROLL_PAUSE_SECONDS)
+                    {
+                        if (scrollOffsets[i] >= contentHeight - textArea.Height - epsilon)
+                        {
+                            scrollOffsets[i] = 0f;
+                            pauseStartTime[i] = DateTime.Now;
+                        }
+                        else
+                        {
+                            scrollPaused[i] = false;
+                            scrollOffsets[i] = speed;
+                        }
+                    }
+                }
+                else
+                {
+                    if (scrollOffsets[i] <= epsilon)
+                    {
+                        scrollPaused[i] = true;
+                        pauseStartTime[i] = DateTime.Now;
+                    }
+                    else
+                    {
+                        scrollOffsets[i] += speed;
+                        if (scrollOffsets[i] >= contentHeight - textArea.Height - epsilon)
+                        {
+                            scrollOffsets[i] = contentHeight - textArea.Height;
+                            scrollPaused[i] = true;
+                            pauseStartTime[i] = DateTime.Now;
+                        }
+                    }
+                }
+                needRedraw = true;
+            }
+            if (needRedraw) Invalidate();
+        }
+
+        private float MeasureTextHeight(string text, Font font, int maxWidth)
+        {
+            using (Graphics g = this.CreateGraphics())
+            {
+                SizeF size = g.MeasureString(text, font, maxWidth);
+                return size.Height;
+            }
+        }
+
+        private Rectangle GetContentArea(int subjectIndex)
+        {
+            if (rotationMode)
+            {
+                Rectangle bigRect = new Rectangle(150, 100, 900, 475);
+                return new Rectangle(bigRect.Left + 50, bigRect.Top + 150, bigRect.Width - 100, bigRect.Height - 200);
+            }
+            else
+            {
+                return new Rectangle(
+                    gridRects[subjectIndex].Left + 10,
+                    gridRects[subjectIndex].Top + 60,
+                    gridRects[subjectIndex].Width - 20,
+                    gridRects[subjectIndex].Height - 70);
+            }
+        }
+
+        // ---------- 编辑模式属性 ----------
+        private bool EditMode
+        {
+            get { return editMode; }
+            set
+            {
+                if (editMode != value)
+                {
+                    editMode = value;
+                    if (editMode)
+                    {
+                        if (!unsubmittedMode)
+                        {
+                            CreateTimeComboBoxes();
+                        }
+                        scrollOffsets.Clear();
+                        scrollPaused.Clear();
+                        pauseStartTime.Clear();
+                    }
+                    else
+                    {
+                        DestroyTimeComboBoxes();
+                        if (editingSubjectIndex != -1)
+                            FinishInlineEdit();
+                        scrollOffsets.Clear();
+                        scrollPaused.Clear();
+                        pauseStartTime.Clear();
+                    }
+                    Invalidate();
+                }
+            }
+        }
+
+        // ---------- 提交时间下拉框管理 ----------
+        private void CreateTimeComboBoxes()
+        {
+            DestroyTimeComboBoxes();
+            for (int i = 0; i < gridRects.Count && i < currentSubjects.Length; i++)
+            {
+                string subject = currentSubjects[i];
+                Rectangle virtualRect = GetDueTimeRect(i);
+                Point screenLoc = MapToScreen(virtualRect.Location);
+                Size screenSize = new Size(
+                    (int)(virtualRect.Width * scaleFactor),
+                    (int)(virtualRect.Height * scaleFactor)
+                );
+
+                string currentValue = homeworkData.DueTimes.ContainsKey(subject) ? homeworkData.DueTimes[subject] : "";
+
+                var comboBox = new ComboBox
+                {
+                    DropDownStyle = ComboBoxStyle.DropDownList,
+                    Location = screenLoc,
+                    Size = new Size(screenSize.Width, 25),
+                    Font = font22,
+                    FlatStyle = FlatStyle.Flat,
+                    BackColor = Color.FromArgb(40, 40, 40),
+                    ForeColor = Color.White,
+                    DrawMode = DrawMode.OwnerDrawFixed,
+                    Tag = i
+                };
+                List<string> items = new List<string>();
+                for (int j = 1; j <= appConfig.EveningClassCount; j++)
+                {
+                    items.Add($"晚修{j}");
+                }
+                items.Add("无");
+                comboBox.Items.AddRange(items.ToArray());
+
+                int selectedIndex = comboBox.Items.IndexOf(currentValue);
+                if (selectedIndex < 0)
+                    selectedIndex = appConfig.EveningClassCount;
+                comboBox.SelectedIndex = selectedIndex;
+
+                comboBox.DrawItem += TimeComboBox_DrawItem;
+                comboBox.SelectedIndexChanged += TimeComboBox_SelectedIndexChanged;
+
+                this.Controls.Add(comboBox);
+                timeComboBoxes.Add(comboBox);
+            }
+        }
+
+        private void DestroyTimeComboBoxes()
+        {
+            foreach (var combo in timeComboBoxes)
+            {
+                combo.SelectedIndexChanged -= TimeComboBox_SelectedIndexChanged;
+                combo.DrawItem -= TimeComboBox_DrawItem;
+                this.Controls.Remove(combo);
+                combo.Dispose();
+            }
+            timeComboBoxes.Clear();
+        }
+
+        private void TimeComboBox_DrawItem(object sender, DrawItemEventArgs e)
+        {
+            if (e.Index < 0) return;
+            ComboBox combo = sender as ComboBox;
+            string text = combo.Items[e.Index].ToString();
+
+            bool isSelected = (e.State & DrawItemState.Selected) == DrawItemState.Selected;
+            Color bgColor = isSelected ? Color.FromArgb(80, 80, 80) : Color.FromArgb(40, 40, 40);
+            using (SolidBrush bgBrush = new SolidBrush(bgColor))
+            {
+                e.Graphics.FillRectangle(bgBrush, e.Bounds);
+            }
+
+            using (SolidBrush textBrush = new SolidBrush(Color.White))
+            {
+                e.Graphics.DrawString(text, combo.Font, textBrush, e.Bounds.Left + 5, e.Bounds.Top + 2);
+            }
+
+            e.DrawFocusRectangle();
+        }
+
+        private void TimeComboBox_SelectedIndexChanged(object sender, EventArgs e)
+        {
+            ComboBox combo = sender as ComboBox;
+            if (combo == null) return;
+            int subjectIndex = (int)combo.Tag;
+            string subject = currentSubjects[subjectIndex];
+            string newValue = combo.SelectedItem?.ToString() ?? "";
+            homeworkData.DueTimes[subject] = newValue;
+            SaveHomeworkData();
+        }
+
+        // ---------- OnLoad 方法 ----------
+        private void OnLoad(object sender, EventArgs e)
+        {
+            ApplyBackgroundEffect(appConfig.BackgroundEffect);
+
+            // 检查是否有待处理的更新
+            if (appConfig.UpdatePending == 1)
+            {
+                string appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+                string upgradePath = Path.Combine(appData, "HomeworkViewerUpgrader");
+                if (Directory.Exists(upgradePath))
+                {
+                    try
+                    {
+                        Directory.Delete(upgradePath, true);
+                    }
+                    catch { }
+                }
+                appConfig.UpdatePending = 0;
+                appConfig.Save();
+            }
+
+            // 判断是否为 Windows 10（Build < 22000），Windows 11 不自动全屏
+            var version = Environment.OSVersion.Version;
+            if (version.Major == 10 && version.Minor == 0 && version.Build < 22000)
+            {
+                this.WindowState = FormWindowState.Maximized;
+                this.FormBorderStyle = FormBorderStyle.None;
+                fullscreen = true;
+                UpdateScale();
+            }
+        }
+
+        private void OnFormClosing(object sender, FormClosingEventArgs e)
+        {
+            // 允许直接关闭
+        }
+
         protected override void OnFormClosed(FormClosedEventArgs e)
         {
             rotationTimer?.Dispose();
@@ -2350,7 +2498,6 @@ namespace HomeworkViewer
             BLUE_SEMI?.Dispose();
             PURPLE_SEMI?.Dispose();
             DARKORANGE_SEMI?.Dispose();
-            // trayIcon?.Dispose();
             base.OnFormClosed(e);
         }
     }

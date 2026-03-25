@@ -1,1 +1,7 @@
-{"Version":"1.2.0","ReleaseType":"Stable","IsMandatory":"1","Hash":"sha256:cb1c0629e511497cbec5e703c2943289b0bccde0048200badd9d792c7b800496"}
+{
+  "Version": "1.4.0",
+  "ReleaseType": "Stable",
+  "IsMandatory": "0",
+  "Hash": "sha256:a4927c3a87f107ec688ff827dfc6e45d4935e51a0ec97dc913b6f470f2beacb7",
+  "DownloadUrl": "https://github.com/Suixiuliang/HomeworkViewer/releases/download/v1.4.0-stable/HomeworkViewer.exe"
+}
