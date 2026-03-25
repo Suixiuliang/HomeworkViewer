@@ -890,7 +890,7 @@ namespace HomeworkViewer
                 AutoSize = true,
                 BackColor = Color.Transparent
             };
-            Label lblVersion = new Label { Text = "作业展板 版本 1.2.0", Font = new Font("微软雅黑", 12, FontStyle.Bold), AutoSize = true, ForeColor = Color.White, BackColor = Color.Transparent };
+            Label lblVersion = new Label { Text = "作业展板 版本 1.4.0", Font = new Font("微软雅黑", 12, FontStyle.Bold), AutoSize = true, ForeColor = Color.White, BackColor = Color.Transparent };
             layout.Controls.Add(lblVersion, 0, 0);
             Label lblAuthor = new Label { Text = "\n作者: MaxSui 隋修梁", AutoSize = true, ForeColor = Color.White, BackColor = Color.Transparent, Font = new Font("微软雅黑", 10) };
             layout.Controls.Add(lblAuthor, 0, 1);
