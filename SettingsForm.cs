@@ -18,7 +18,7 @@ namespace HomeworkViewer
         public string ReleaseType { get; set; }
         public string IsMandatory { get; set; }
         public string Hash { get; set; }
-        public string DownloadUrl { get; set; } // 新增：直接下载链接
+        public string DownloadUrl { get; set; }
     }
 
     public partial class SettingsForm : Form
@@ -50,6 +50,7 @@ namespace HomeworkViewer
         private FlowLayoutPanel eveningPanel;
         private List<DateTimePicker> startPickers = new List<DateTimePicker>();
         private List<DateTimePicker> endPickers = new List<DateTimePicker>();
+        // 以下按钮已隐藏，但保留字段以避免修改过多，实际不可见
         private Button btnTestFlash;
         private Button btnStopFlash;
 
@@ -91,6 +92,9 @@ namespace HomeworkViewer
             this.BackColor = Color.Black;
             this.ForeColor = Color.White;
             GetCurrentVersion();
+
+            // 确保镜像检测在窗体加载后执行（句柄已创建）
+            this.Load += (s, e) => { _ = UpdateMirrorStatusAsync(lblMirrorStatus); };
         }
 
         private void GetCurrentVersion()
@@ -289,13 +293,125 @@ namespace HomeworkViewer
                             bool isMandatory = remoteInfo.IsMandatory == "0";
                             if (isMandatory)
                             {
-                                DialogResult result = MessageBox.Show($"发现强制更新 {remoteInfo.Version} ({remoteInfo.ReleaseType})。\n点击确定前往下载页面。", "强制更新", MessageBoxButtons.OKCancel);
-                                if (result == DialogResult.OK)
+                                // 强制更新：优先使用直链下载
+                                if (!string.IsNullOrEmpty(remoteInfo.DownloadUrl))
                                 {
-                                    Process.Start("https://github.com/Suixiuliang/HomeworkViewer/releases");
+                                    btnCheckUpdate.Text = "准备下载...";
+                                    progressDownload.Visible = true;
+                                    lblDownloadStatus.Visible = true;
+                                    lblDownloadStatus.Text = "准备下载...";
+                                    progressDownload.Value = 0;
+
+                                    Task.Run(async () =>
+                                    {
+                                        try
+                                        {
+                                            string fileName = remoteInfo.DownloadUrl.Substring(remoteInfo.DownloadUrl.LastIndexOf('/') + 1);
+                                            if (string.IsNullOrEmpty(fileName))
+                                                fileName = "update.exe";
+
+                                            var confirm = MessageBox.Show(
+                                                $"发现强制更新 {remoteInfo.Version} ({remoteInfo.ReleaseType})。\n将下载更新包：{fileName}\n\n是否立即下载并更新？",
+                                                "强制更新",
+                                                MessageBoxButtons.YesNo,
+                                                MessageBoxIcon.Warning);
+
+                                            if (confirm == DialogResult.Yes)
+                                            {
+                                                this.Invoke((Action)(() => btnCheckUpdate.Text = "下载中..."));
+
+                                                var progress = new Progress<DownloadProgressInfo>(p =>
+                                                {
+                                                    if (!this.IsDisposed)
+                                                    {
+                                                        this.Invoke((Action)(() =>
+                                                        {
+                                                            progressDownload.Value = Math.Min(p.Percentage, 100);
+                                                            string speed = p.SpeedKBps > 0 ? $"{p.SpeedKBps:F1} KB/s" : "计算中...";
+                                                            string remaining = p.TimeRemaining > TimeSpan.Zero ? $"{p.TimeRemaining:mm\\:ss}" : "--:--";
+                                                            lblDownloadStatus.Text = $"下载中 {p.Percentage}% | {speed} | 剩余 {remaining}";
+                                                        }));
+                                                    }
+                                                });
+
+                                                string expectedHash = null;
+                                                if (remoteInfo.Hash != null && remoteInfo.Hash.StartsWith("sha256:"))
+                                                    expectedHash = remoteInfo.Hash.Substring(7);
+
+                                                string downloadedFile = await _downloadHelper.DownloadFileAsync(
+                                                    remoteInfo.DownloadUrl,
+                                                    fileName,
+                                                    expectedHash,
+                                                    progress);
+
+                                                this.Invoke((Action)(() =>
+                                                {
+                                                    progressDownload.Visible = false;
+                                                    lblDownloadStatus.Visible = false;
+                                                    btnCheckUpdate.Text = "下载完成";
+                                                }));
+
+                                                config.UpdatePending = 1;
+                                                config.Save();
+
+                                                DialogResult dialogResult = MessageBox.Show(
+                                                    "更新包已下载完成。请点击确定启动安装程序，应用将自动关闭。",
+                                                    "更新",
+                                                    MessageBoxButtons.OKCancel,
+                                                    MessageBoxIcon.Information);
+
+                                                if (dialogResult == DialogResult.OK)
+                                                {
+                                                    _downloadHelper.OpenOrInstallFile(downloadedFile);
+                                                    Application.Exit();
+                                                }
+                                                else
+                                                {
+                                                    this.Invoke((Action)(() =>
+                                                    {
+                                                        btnCheckUpdate.Enabled = true;
+                                                        btnCheckUpdate.Text = "检查更新";
+                                                    }));
+                                                }
+                                            }
+                                            else
+                                            {
+                                                this.Invoke((Action)(() =>
+                                                {
+                                                    btnCheckUpdate.Enabled = true;
+                                                    btnCheckUpdate.Text = "检查更新";
+                                                    progressDownload.Visible = false;
+                                                    lblDownloadStatus.Visible = false;
+                                                }));
+                                            }
+                                        }
+                                        catch (Exception ex)
+                                        {
+                                            MessageBox.Show($"下载失败：{ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                                            this.Invoke((Action)(() =>
+                                            {
+                                                btnCheckUpdate.Enabled = true;
+                                                btnCheckUpdate.Text = "检查更新";
+                                                progressDownload.Visible = false;
+                                                lblDownloadStatus.Visible = false;
+                                            }));
+                                        }
+                                    });
                                 }
-                                btnCheckUpdate.Text = "检查更新";
-                                btnCheckUpdate.Enabled = true;
+                                else
+                                {
+                                    DialogResult result = MessageBox.Show($"发现强制更新 {remoteInfo.Version} ({remoteInfo.ReleaseType})。\n点击确定前往下载页面。", "强制更新", MessageBoxButtons.OKCancel);
+                                    if (result == DialogResult.OK)
+                                    {
+                                        Process.Start(new ProcessStartInfo
+                                        {
+                                            FileName = "https://github.com/Suixiuliang/HomeworkViewer/releases",
+                                            UseShellExecute = true
+                                        });
+                                    }
+                                    btnCheckUpdate.Text = "检查更新";
+                                    btnCheckUpdate.Enabled = true;
+                                }
                             }
                             else
                             {
@@ -313,7 +429,6 @@ namespace HomeworkViewer
 
                                     try
                                     {
-                                        // 优先使用 version.txt 中提供的直接下载链接
                                         if (!string.IsNullOrEmpty(remoteInfo.DownloadUrl))
                                         {
                                             string fileName = remoteInfo.DownloadUrl.Substring(remoteInfo.DownloadUrl.LastIndexOf('/') + 1);
@@ -388,8 +503,7 @@ namespace HomeworkViewer
                                         }
                                         else
                                         {
-                                            // 没有直接下载链接，打开 Releases 页面
-                                            Process.Start("https://github.com/Suixiuliang/HomeworkViewer/releases");
+                                            MessageBox.Show("更新信息中缺少下载链接，请联系开发者。", "下载失败", MessageBoxButtons.OK, MessageBoxIcon.Error);
                                             btnCheckUpdate.Enabled = true;
                                             btnCheckUpdate.Text = "检查更新";
                                             progressDownload.Visible = false;
@@ -758,14 +872,15 @@ namespace HomeworkViewer
                 BackColor = Color.Transparent,
                 Padding = new Padding(10, 10, 0, 0)
             };
-            //btnTestFlash = new Button { Text = "测试闪烁", Width = 100, Height = 30, BackColor = Color.FromArgb(64, 64, 64), ForeColor = Color.White, FlatStyle = FlatStyle.Flat };
-            //btnTestFlash.Click += BtnTestFlash_Click;
+            // 测试闪烁按钮（隐藏）
+            btnTestFlash = new Button { Text = "测试闪烁", Width = 100, Height = 30, BackColor = Color.FromArgb(64, 64, 64), ForeColor = Color.White, FlatStyle = FlatStyle.Flat, Visible = false };
+            btnTestFlash.Click += BtnTestFlash_Click;
+            // 停止闪烁按钮（隐藏）
+            btnStopFlash = new Button { Text = "停止闪烁", Width = 100, Height = 30, BackColor = Color.FromArgb(64, 64, 64), ForeColor = Color.White, FlatStyle = FlatStyle.Flat, Margin = new Padding(10, 0, 0, 0), Visible = false };
+            btnStopFlash.Click += BtnStopFlash_Click;
 
-            //btnStopFlash = new Button { Text = "停止闪烁", Width = 100, Height = 30, BackColor = Color.FromArgb(64, 64, 64), ForeColor = Color.White, FlatStyle = FlatStyle.Flat, Margin = new Padding(10, 0, 0, 0) };
-            //btnStopFlash.Click += BtnStopFlash_Click;
-
-            //buttonPanel.Controls.Add(btnTestFlash);
-            //buttonPanel.Controls.Add(btnStopFlash);
+            buttonPanel.Controls.Add(btnTestFlash);
+            buttonPanel.Controls.Add(btnStopFlash);
             mainLayout.Controls.Add(buttonPanel, 0, 2);
 
             timeSlotPanel.Controls.Add(mainLayout);
@@ -890,7 +1005,7 @@ namespace HomeworkViewer
                 AutoSize = true,
                 BackColor = Color.Transparent
             };
-            Label lblVersion = new Label { Text = "作业展板 版本 1.4.0", Font = new Font("微软雅黑", 12, FontStyle.Bold), AutoSize = true, ForeColor = Color.White, BackColor = Color.Transparent };
+            Label lblVersion = new Label { Text = "作业展板 版本 1.4.5", Font = new Font("微软雅黑", 12, FontStyle.Bold), AutoSize = true, ForeColor = Color.White, BackColor = Color.Transparent };
             layout.Controls.Add(lblVersion, 0, 0);
             Label lblAuthor = new Label { Text = "\n作者: MaxSui 隋修梁", AutoSize = true, ForeColor = Color.White, BackColor = Color.Transparent, Font = new Font("微软雅黑", 10) };
             layout.Controls.Add(lblAuthor, 0, 1);
@@ -964,8 +1079,8 @@ namespace HomeworkViewer
             layout.Controls.Add(lblUpdateContent, 0, 8);
 
             aboutPanel.Controls.Add(layout);
-
-            _ = UpdateMirrorStatusAsync(lblMirrorStatus);
+            
+            // 移除立即调用的镜像检测，改为在 Load 事件中执行
         }
 
         private async Task UpdateMirrorStatusAsync(Label statusLabel)

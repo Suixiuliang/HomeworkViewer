@@ -107,90 +107,101 @@ namespace HomeworkViewer
             if (File.Exists(localPath)) try { File.Delete(localPath); } catch { }
 
             string mirroredUrl = await _mirrorManager.GetMirroredUrlAsync(downloadUrl);
+            int retry = 0;
+            Exception lastException = null;
 
-            try
+            while (retry < 3)
             {
-                using (var response = await _httpClient.GetAsync(mirroredUrl, HttpCompletionOption.ResponseHeadersRead))
+                try
                 {
-                    response.EnsureSuccessStatusCode();
-                    long totalBytes = response.Content.Headers.ContentLength ?? -1;
-                    using (var contentStream = await response.Content.ReadAsStreamAsync())
-                    using (var fileStream = new FileStream(localPath, FileMode.Create, FileAccess.Write, FileShare.None, 8192, true))
+                    using (var response = await _httpClient.GetAsync(mirroredUrl, HttpCompletionOption.ResponseHeadersRead))
                     {
-                        var buffer = new byte[8192];
-                        long totalRead = 0;
-                        int bytesRead;
-                        var lastReportTime = DateTime.Now;
-                        long lastReportBytes = 0;
-
-                        while ((bytesRead = await contentStream.ReadAsync(buffer, 0, buffer.Length)) > 0)
+                        response.EnsureSuccessStatusCode();
+                        long totalBytes = response.Content.Headers.ContentLength ?? -1;
+                        using (var contentStream = await response.Content.ReadAsStreamAsync())
+                        using (var fileStream = new FileStream(localPath, FileMode.Create, FileAccess.Write, FileShare.None, 8192, true))
                         {
-                            await fileStream.WriteAsync(buffer, 0, bytesRead);
-                            totalRead += bytesRead;
+                            var buffer = new byte[8192];
+                            long totalRead = 0;
+                            int bytesRead;
+                            var lastReportTime = DateTime.Now;
+                            long lastReportBytes = 0;
 
-                            if (progress != null && totalBytes > 0)
+                            while ((bytesRead = await contentStream.ReadAsync(buffer, 0, buffer.Length)) > 0)
                             {
-                                var now = DateTime.Now;
-                                if ((now - lastReportTime).TotalMilliseconds >= 100)
+                                await fileStream.WriteAsync(buffer, 0, bytesRead);
+                                totalRead += bytesRead;
+
+                                if (progress != null && totalBytes > 0)
                                 {
-                                    int percentage = (int)((totalRead * 100) / totalBytes);
-                                    double speedKBps = 0;
-                                    TimeSpan timeRemaining = TimeSpan.Zero;
-                                    if (lastReportBytes > 0)
+                                    var now = DateTime.Now;
+                                    if ((now - lastReportTime).TotalMilliseconds >= 100)
                                     {
-                                        double bytesPerSec = (totalRead - lastReportBytes) / (now - lastReportTime).TotalSeconds;
-                                        speedKBps = bytesPerSec / 1024.0;
-                                        if (speedKBps > 0)
+                                        int percentage = (int)((totalRead * 100) / totalBytes);
+                                        double speedKBps = 0;
+                                        TimeSpan timeRemaining = TimeSpan.Zero;
+                                        if (lastReportBytes > 0)
                                         {
-                                            double remainingBytes = totalBytes - totalRead;
-                                            timeRemaining = TimeSpan.FromSeconds(remainingBytes / (speedKBps * 1024));
+                                            double bytesPerSec = (totalRead - lastReportBytes) / (now - lastReportTime).TotalSeconds;
+                                            speedKBps = bytesPerSec / 1024.0;
+                                            if (speedKBps > 0)
+                                            {
+                                                double remainingBytes = totalBytes - totalRead;
+                                                timeRemaining = TimeSpan.FromSeconds(remainingBytes / (speedKBps * 1024));
+                                            }
                                         }
+                                        var info = new DownloadProgressInfo
+                                        {
+                                            BytesReceived = totalRead,
+                                            TotalBytes = totalBytes,
+                                            Percentage = percentage,
+                                            SpeedKBps = speedKBps,
+                                            TimeRemaining = timeRemaining
+                                        };
+                                        progress.Report(info);
+                                        lastReportBytes = totalRead;
+                                        lastReportTime = now;
                                     }
-                                    var info = new DownloadProgressInfo
-                                    {
-                                        BytesReceived = totalRead,
-                                        TotalBytes = totalBytes,
-                                        Percentage = percentage,
-                                        SpeedKBps = speedKBps,
-                                        TimeRemaining = timeRemaining
-                                    };
-                                    progress.Report(info);
-                                    lastReportBytes = totalRead;
-                                    lastReportTime = now;
                                 }
                             }
-                        }
-                        if (progress != null && totalBytes > 0)
-                        {
-                            var finalInfo = new DownloadProgressInfo
+                            if (progress != null && totalBytes > 0)
                             {
-                                BytesReceived = totalBytes,
-                                TotalBytes = totalBytes,
-                                Percentage = 100,
-                                SpeedKBps = 0,
-                                TimeRemaining = TimeSpan.Zero
-                            };
-                            progress.Report(finalInfo);
+                                var finalInfo = new DownloadProgressInfo { BytesReceived = totalBytes, TotalBytes = totalBytes, Percentage = 100, SpeedKBps = 0, TimeRemaining = TimeSpan.Zero };
+                                progress.Report(finalInfo);
+                            }
                         }
                     }
-                }
 
-                if (!string.IsNullOrEmpty(expectedHash))
-                {
-                    string actualHash = await Task.Run(() => ComputeSHA256(localPath));
-                    if (!string.Equals(actualHash, expectedHash, StringComparison.OrdinalIgnoreCase))
+                    // 哈希校验
+                    if (!string.IsNullOrEmpty(expectedHash))
                     {
-                        File.Delete(localPath);
-                        throw new Exception($"哈希校验失败：期望 {expectedHash}，实际 {actualHash}");
+                        string actualHash = await Task.Run(() => ComputeSHA256(localPath));
+                        if (!string.Equals(actualHash, expectedHash, StringComparison.OrdinalIgnoreCase))
+                        {
+                            File.Delete(localPath);
+                            throw new Exception($"哈希校验失败：期望 {expectedHash}，实际 {actualHash}");
+                        }
                     }
+                    return localPath;
                 }
-                return localPath;
+                catch (HttpRequestException ex) when (mirroredUrl != downloadUrl)
+                {
+                    // 镜像失败，回退到原始URL
+                    mirroredUrl = downloadUrl;
+                    lastException = ex;
+                    retry++;
+                    await Task.Delay(1000);
+                    continue;
+                }
+                catch (Exception ex)
+                {
+                    lastException = ex;
+                    retry++;
+                    if (retry >= 3) throw;
+                    await Task.Delay(1000 * retry);
+                }
             }
-            catch (Exception ex)
-            {
-                Debug.WriteLine($"下载失败: {ex.Message}");
-                throw;
-            }
+            throw lastException ?? new Exception("下载失败");
         }
 
         private string ComputeSHA256(string filePath)
