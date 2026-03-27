@@ -151,6 +151,12 @@ namespace HomeworkViewer
         private bool _isWin10OrAbove = false;
         private bool _sizing = false;
 
+        // Markdown 模式滚动
+        private float _markdownScrollOffset = 0f;
+        private bool _markdownScrollPaused = false;
+        private DateTime _markdownPauseStart = DateTime.Now;
+        private float _markdownTotalHeight = 0;
+
         public HomeworkViewer()
         {
             SETTINGS_BTN_POS = new Point(ROTATE_BTN_POS.X - BTN_SQUARE_SIZE - 10, 13);
@@ -529,20 +535,17 @@ namespace HomeworkViewer
         private void LoadHomeworkData(DateTime date)
         {
             homeworkData = HomeworkData.Load(date);
-            
-            // 如果是新日期（没有作业数据），自动设置默认提交时间为“晚修3”
+
             if (homeworkData.DueTimes.Count == 0)
             {
                 foreach (string subject in currentSubjects)
                 {
-                    // 如果晚修节数配置大于等于3，则默认设置为“晚修3”，否则设置为“无”
                     string defaultDue = appConfig.EveningClassCount >= 3 ? "晚修3" : "无";
                     homeworkData.DueTimes[subject] = defaultDue;
                 }
-                // 立即保存，避免下次加载时重复设置
                 SaveHomeworkData();
             }
-            
+
             if (EditMode && !unsubmittedMode)
             {
                 CreateTimeComboBoxes();
@@ -630,8 +633,20 @@ namespace HomeworkViewer
                         _expandPressed = true;
                     else if (editBtnRect.Contains(x, y))
                         _editPressed = true;
-                    else if (fullscreenBtnRect.Contains(x, y))
-                        _fullscreenPressed = true;
+                    else
+                    {
+                        bool isWin10 = Environment.OSVersion.Version.Major == 10 && Environment.OSVersion.Version.Minor == 0 && Environment.OSVersion.Version.Build < 22000;
+                        if (isWin10)
+                        {
+                            if (minimizeBtnRect.Contains(x, y))
+                                _minimizePressed = true;
+                        }
+                        else
+                        {
+                            if (fullscreenBtnRect.Contains(x, y))
+                                _fullscreenPressed = true;
+                        }
+                    }
                 }
                 else
                 {
@@ -919,14 +934,10 @@ namespace HomeworkViewer
             }
             else
             {
-                // 普通模式
-                bool isWin10 = Environment.OSVersion.Version.Major == 10 && 
-                            Environment.OSVersion.Version.Minor == 0 && 
-                            Environment.OSVersion.Version.Build < 22000;
+                bool isWin10 = Environment.OSVersion.Version.Major == 10 && Environment.OSVersion.Version.Minor == 0 && Environment.OSVersion.Version.Build < 22000;
 
                 if (!_buttonsExpanded)
                 {
-                    // 折叠状态
                     if (expandBtnRect.Contains(x, y))
                     {
                         _buttonsExpanded = true;
@@ -965,7 +976,6 @@ namespace HomeworkViewer
                 }
                 else
                 {
-                    // 展开状态
                     if (collapseBtnRect.Contains(x, y))
                     {
                         _buttonsExpanded = false;
@@ -1053,16 +1063,14 @@ namespace HomeworkViewer
                         Application.Exit();
                         return;
                     }
-                    else if (isWin10 == false && fullscreenBtnRect.Contains(x, y))
+                    else if (!isWin10 && fullscreenBtnRect.Contains(x, y))
                     {
-                        // Win11 下才有全屏/缩小按钮
                         if (EditMode) EditMode = false;
                         ToggleFullscreen();
                         return;
                     }
                 }
 
-                // 处理编辑区域（卡片内容）
                 if (EditMode && !rotationMode && !unsubmittedMode)
                 {
                     for (int i = 0; i < gridRects.Count && i < currentSubjects.Length; i++)
@@ -1106,14 +1114,13 @@ namespace HomeworkViewer
             else if (fieldType == EditFieldType.Unsubmitted)
                 currentText = homeworkData.Unsubmitted.ContainsKey(subject) ? homeworkData.Unsubmitted[subject] : "";
 
-            // 根据当前字体级别和全屏状态确定内联编辑字体
-            Font editFont = font30; // 默认
+            Font editFont = font30;
             if (fullscreen)
             {
                 int newLevel = appConfig.FontSizeLevel + 1;
-                if (newLevel > 2) newLevel = 2; // 最大级别为2（大）
+                if (newLevel > 2) newLevel = 2;
                 float scale = fontScales[newLevel];
-                editFont = new Font("微软雅黑", 20 * scale); // 与 font30 的构造一致，但使用大一级的 scale
+                editFont = new Font("微软雅黑", 20 * scale);
             }
 
             var textBox = new TextBox
@@ -1124,7 +1131,7 @@ namespace HomeworkViewer
                 Location = screenLoc,
                 Size = screenSize,
                 Text = currentText,
-                Font = editFont,  // 使用动态计算的字体
+                Font = editFont,
                 BorderStyle = BorderStyle.FixedSingle,
                 BackColor = Color.FromArgb(40, 40, 40),
                 ForeColor = Color.White
@@ -1156,6 +1163,42 @@ namespace HomeworkViewer
             {
                 e.SuppressKeyPress = true;
                 CancelInlineEdit();
+            }
+            else if (e.Control && e.KeyCode == Keys.I)
+            {
+                e.SuppressKeyPress = true;
+                if (inlineEditControl is TextBox tb && appConfig.EnableMarkdown && currentEditType == EditFieldType.Subject)
+                {
+                    tb.LostFocus -= InlineEdit_LostFocus;
+                    try
+                    {
+                        using (var dialog = new InsertFormulaDialog())
+                        {
+                            if (dialog.ShowDialog() == DialogResult.OK && !string.IsNullOrWhiteSpace(dialog.FormulaText))
+                            {
+                                string unicodeFormula = MarkdownRenderer.ConvertLatexToUnicode(dialog.FormulaText);
+                                int start = tb.SelectionStart;
+                                int length = tb.SelectionLength;
+                                if (length > 0)
+                                {
+                                    tb.Text = tb.Text.Remove(start, length).Insert(start, unicodeFormula);
+                                    tb.SelectionStart = start + unicodeFormula.Length;
+                                }
+                                else
+                                {
+                                    tb.Text = tb.Text + unicodeFormula;
+                                    tb.SelectionStart = tb.Text.Length;
+                                }
+                                tb.ScrollToCaret();
+                            }
+                        }
+                    }
+                    finally
+                    {
+                        tb.LostFocus += InlineEdit_LostFocus;
+                        tb.Focus();
+                    }
+                }
             }
         }
 
@@ -1438,7 +1481,6 @@ namespace HomeworkViewer
         {
             if (rotationMode || unsubmittedMode)
             {
-                // 轮播或未交模式：返回按钮 + 右上角三个按钮（编辑、记录、全屏）
                 int backY = barRect.Top + (barRect.Height - BTN_SQUARE_SIZE) / 2;
                 backBtnRect = new Rectangle(35, backY, BTN_SQUARE_SIZE, BTN_SQUARE_SIZE);
                 DrawTransparentButton(g, backBtnRect, "返回", buttonIcons.ContainsKey("返回") ? buttonIcons["返回"] : null, ref backBtnRect, backBtnRect.Location, _backPressed);
@@ -1461,7 +1503,6 @@ namespace HomeworkViewer
                 string fullscreenIconKey = fullscreen ? "缩小" : "全屏";
                 DrawTransparentButton(g, fullscreenBtnRect, fullscreen ? "缩小" : "全屏", buttonIcons.ContainsKey(fullscreenIconKey) ? buttonIcons[fullscreenIconKey] : null, ref fullscreenBtnRect, fullscreenPos, _fullscreenPressed);
 
-                // 左右箭头（分页）
                 if (unsubmittedMode)
                 {
                     int totalPages = (currentSubjects.Length + UNSUBMITTED_ROWS_PER_PAGE - 1) / UNSUBMITTED_ROWS_PER_PAGE;
@@ -1528,7 +1569,6 @@ namespace HomeworkViewer
 
                 if (!_buttonsExpanded)
                 {
-                    // 折叠状态：三个按钮
                     int totalButtonsWidth = 3 * BTN_SQUARE_SIZE + 2 * 10;
                     int startX = barRect.Right - totalButtonsWidth - 20;
 
@@ -1540,21 +1580,14 @@ namespace HomeworkViewer
                     DrawTransparentButton(g, editBtnRect, editMode ? "完成" : "编辑", buttonIcons.ContainsKey(editMode ? "完成" : "编辑") ? buttonIcons[editMode ? "完成" : "编辑"] : null, ref editBtnRect, editPos, _editPressed);
 
                     if (isWin10)
-                    {
                         DrawTransparentButton(g, minimizeBtnRect, "最小化", buttonIcons.ContainsKey("最小化") ? buttonIcons["最小化"] : null, ref minimizeBtnRect, thirdPos, _minimizePressed);
-                    }
                     else
-                    {
-                        string fullscreenIconKey = fullscreen ? "缩小" : "全屏";
-                        DrawTransparentButton(g, fullscreenBtnRect, fullscreen ? "缩小" : "全屏", buttonIcons.ContainsKey(fullscreenIconKey) ? buttonIcons[fullscreenIconKey] : null, ref fullscreenBtnRect, thirdPos, _fullscreenPressed);
-                    }
+                        DrawTransparentButton(g, fullscreenBtnRect, fullscreen ? "缩小" : "全屏", buttonIcons.ContainsKey(fullscreen ? "缩小" : "全屏") ? buttonIcons[fullscreen ? "缩小" : "全屏"] : null, ref fullscreenBtnRect, thirdPos, _fullscreenPressed);
                 }
                 else
                 {
-                    // 展开状态
                     if (isWin10)
                     {
-                        // 8个按钮：收起 + 7个功能
                         int totalButtonsWidth = 8 * BTN_SQUARE_SIZE + 7 * 10;
                         int startX = barRect.Right - totalButtonsWidth - 20;
 
@@ -1578,7 +1611,6 @@ namespace HomeworkViewer
                     }
                     else
                     {
-                        // 9个按钮：收起 + 8个功能
                         int totalButtonsWidth = 9 * BTN_SQUARE_SIZE + 8 * 10;
                         int startX = barRect.Right - totalButtonsWidth - 20;
 
@@ -2015,15 +2047,111 @@ namespace HomeworkViewer
             }
         }
 
-        // ---------- 改进的文本绘制（支持换行和滚动） ----------
+        // ---------- 文本绘制（支持 Markdown 渲染和 LaTeX 转换） ----------
         private void DrawTextInArea(Graphics g, string text, Rectangle area, Font font, bool center = false, float scrollOffset = 0f)
+        {
+            if (editMode || !appConfig.EnableMarkdown)
+            {
+                DrawPlainTextInArea(g, text, area, font, center, scrollOffset);
+                return;
+            }
+
+            var paragraphs = MarkdownRenderer.ParseMarkdown(text);
+            if (paragraphs.Count == 0) return;
+
+            _markdownTotalHeight = 0;
+            foreach (var para in paragraphs)
+                _markdownTotalHeight += GetParagraphHeight(para, font);
+
+            float y = area.Top - _markdownScrollOffset;
+            float leftMargin = area.Left + 5;
+
+            GraphicsState state = g.Save();
+            g.SetClip(area);
+
+            using (var defaultBrush = new SolidBrush(TEXT_COLOR))
+            {
+                foreach (var para in paragraphs)
+                {
+                    if (para.FormattedParts.Any(p => p.IsLatex))
+                    {
+                        string combinedText = string.Concat(para.FormattedParts.Select(p => p.Text));
+                        float paraHeight = GetParagraphHeight(para, font);
+                        Rectangle textRect = new Rectangle(area.Left, (int)y, area.Width, (int)paraHeight);
+                        DrawPlainTextInArea(g, combinedText, textRect, font, center, 0);
+                        y += paraHeight * 1.2f;
+                        continue;
+                    }
+
+                    Font paraFont = font;
+                    Brush paraBrush = defaultBrush;
+                    float currentParaHeight = GetParagraphHeight(para, font);
+
+                    if (para.Type == ParagraphType.Code)
+                    {
+                        paraFont = new Font("Consolas", font.Size, FontStyle.Regular);
+                        paraBrush = new SolidBrush(Color.LightGray);
+                        using (var bgBrush = new SolidBrush(Color.FromArgb(40, 40, 40)))
+                        {
+                            g.FillRectangle(bgBrush, leftMargin - 2, y, area.Width - 10, currentParaHeight);
+                        }
+                    }
+                    else if (para.Type == ParagraphType.Quote)
+                    {
+                        paraFont = new Font(font.FontFamily, font.Size, FontStyle.Italic);
+                        paraBrush = new SolidBrush(Color.Gray);
+                        using (var lineBrush = new SolidBrush(Color.Gray))
+                        {
+                            g.FillRectangle(lineBrush, leftMargin - 2, y, 3, currentParaHeight);
+                        }
+                    }
+                    else if (para.Type == ParagraphType.Heading)
+                    {
+                        float scale = 1.0f + (6 - para.HeadingLevel) * 0.2f;
+                        paraFont = new Font(font.FontFamily, font.Size * scale, FontStyle.Bold);
+                        currentParaHeight = paraFont.GetHeight(g);
+                    }
+
+                    if (para.IsListItem)
+                    {
+                        string prefix = para.IsOrderedList ? $"{para.ListItemNumber}. " : "• ";
+                        DrawText(g, prefix, paraFont, defaultBrush, leftMargin, y);
+                        leftMargin += paraFont.GetHeight(g) * 0.8f;
+                    }
+
+                    foreach (var part in para.FormattedParts)
+                    {
+                        Font partFont = new Font(paraFont.FontFamily, paraFont.Size, part.Style);
+                        // 关键：优先使用 part.Color，否则根据段落类型决定颜色
+                        Color textColor = part.Color ?? (para.Type == ParagraphType.Code ? Color.LightGray : TEXT_COLOR);
+                        using (var brush = new SolidBrush(textColor))
+                        {
+                            SizeF size = g.MeasureString(part.Text, partFont);
+                            g.DrawString(part.Text, partFont, brush, leftMargin, y);
+                            leftMargin += size.Width;
+                        }
+                        partFont.Dispose();
+                    }
+
+                    y += currentParaHeight * 1.2f;
+                    leftMargin = area.Left + 5;
+
+                    if (para.Type == ParagraphType.Code || para.Type == ParagraphType.Quote || para.Type == ParagraphType.Heading)
+                        paraFont?.Dispose();
+                    if (paraBrush != defaultBrush) paraBrush?.Dispose();
+                }
+            }
+
+            g.Restore(state);
+        }
+
+        private void DrawPlainTextInArea(Graphics g, string text, Rectangle area, Font font, bool center = false, float scrollOffset = 0f)
         {
             List<string> lines = new List<string>();
             string[] paragraphs = text.Split('\n');
             foreach (string para in paragraphs)
             {
                 if (string.IsNullOrEmpty(para)) continue;
-                // 先按空格分词
                 string[] words = para.Split(' ');
                 string line = "";
                 foreach (string word in words)
@@ -2035,19 +2163,15 @@ namespace HomeworkViewer
                     }
                     else
                     {
-                        if (!string.IsNullOrEmpty(line))
-                            lines.Add(line);
-                        // 如果单个单词仍然超宽，则按字符拆分
+                        if (!string.IsNullOrEmpty(line)) lines.Add(line);
                         if (g.MeasureString(word, font).Width > area.Width)
                         {
                             string remaining = word;
                             while (remaining.Length > 0)
                             {
                                 int take = 1;
-                                while (take < remaining.Length && g.MeasureString(remaining.Substring(0, take), font).Width <= area.Width)
-                                    take++;
-                                while (take > 0 && g.MeasureString(remaining.Substring(0, take), font).Width > area.Width)
-                                    take--;
+                                while (take < remaining.Length && g.MeasureString(remaining.Substring(0, take), font).Width <= area.Width) take++;
+                                while (take > 0 && g.MeasureString(remaining.Substring(0, take), font).Width > area.Width) take--;
                                 if (take == 0) take = 1;
                                 lines.Add(remaining.Substring(0, take));
                                 remaining = remaining.Substring(take);
@@ -2086,6 +2210,46 @@ namespace HomeworkViewer
             }
 
             g.Restore(state);
+        }
+
+        private void DrawText(Graphics g, string text, Font font, Brush brush, float x, float y)
+        {
+            g.DrawString(text, font, brush, x, y);
+        }
+
+        private float GetParagraphHeight(Paragraph para, Font baseFont)
+        {
+            if (para.Type == ParagraphType.Code)
+            {
+                int lineCount = 0;
+                foreach (var part in para.FormattedParts)
+                {
+                    lineCount += part.Text.Split('\n').Length;
+                }
+                using (var codeFont = new Font("Consolas", baseFont.Size, FontStyle.Regular))
+                {
+                    return codeFont.GetHeight() * lineCount;
+                }
+            }
+            else if (para.Type == ParagraphType.Quote)
+            {
+                using (var quoteFont = new Font(baseFont.FontFamily, baseFont.Size, FontStyle.Italic))
+                {
+                    return quoteFont.GetHeight();
+                }
+            }
+            else if (para.Type == ParagraphType.Heading)
+            {
+                float scale = 1.0f + (6 - para.HeadingLevel) * 0.2f;
+                using (var headingFont = new Font(baseFont.FontFamily, baseFont.Size * scale, FontStyle.Bold))
+                {
+                    return headingFont.GetHeight();
+                }
+            }
+            else
+            {
+                return baseFont.GetHeight();
+            }
         }
 
         // ---------- 时间提醒 ----------
@@ -2211,6 +2375,53 @@ namespace HomeworkViewer
         private void ScrollTimer_Tick(object sender, EventArgs e)
         {
             if (editMode) return;
+
+            if (appConfig.EnableMarkdown && !rotationMode && !unsubmittedMode)
+            {
+                float textAreaHeight = gridRects.Count > 0 ? gridRects[0].Height - 70 : 400;
+                if (_markdownTotalHeight > textAreaHeight)
+                {
+                    float mdSpeed = appConfig.ScrollSpeed * 0.05f;
+                    float mdEpsilon = 0.01f;
+
+                    if (_markdownScrollPaused)
+                    {
+                        if ((DateTime.Now - _markdownPauseStart).TotalSeconds >= SCROLL_PAUSE_SECONDS)
+                        {
+                            if (_markdownScrollOffset >= _markdownTotalHeight - textAreaHeight - mdEpsilon)
+                            {
+                                _markdownScrollOffset = 0f;
+                                _markdownPauseStart = DateTime.Now;
+                            }
+                            else
+                            {
+                                _markdownScrollPaused = false;
+                                _markdownScrollOffset = mdSpeed;
+                            }
+                        }
+                    }
+                    else
+                    {
+                        if (_markdownScrollOffset <= mdEpsilon)
+                        {
+                            _markdownScrollPaused = true;
+                            _markdownPauseStart = DateTime.Now;
+                        }
+                        else
+                        {
+                            _markdownScrollOffset += mdSpeed;
+                            if (_markdownScrollOffset >= _markdownTotalHeight - textAreaHeight - mdEpsilon)
+                            {
+                                _markdownScrollOffset = _markdownTotalHeight - textAreaHeight;
+                                _markdownScrollPaused = true;
+                                _markdownPauseStart = DateTime.Now;
+                            }
+                        }
+                    }
+                    Invalidate();
+                }
+                return;
+            }
 
             bool needRedraw = false;
             float speed = appConfig.ScrollSpeed * 0.05f;
@@ -2340,6 +2551,10 @@ namespace HomeworkViewer
                         scrollOffsets.Clear();
                         scrollPaused.Clear();
                         pauseStartTime.Clear();
+                        _markdownScrollOffset = 0f;
+                        _markdownScrollPaused = false;
+                        _markdownPauseStart = DateTime.Now;
+                        _markdownTotalHeight = 0;
                     }
                     Invalidate();
                 }
@@ -2444,7 +2659,6 @@ namespace HomeworkViewer
         {
             ApplyBackgroundEffect(appConfig.BackgroundEffect);
 
-            // 检查是否有待处理的更新
             if (appConfig.UpdatePending == 1)
             {
                 string appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
@@ -2461,7 +2675,6 @@ namespace HomeworkViewer
                 appConfig.Save();
             }
 
-            // 判断是否为 Windows 10（Build < 22000），Windows 11 不自动全屏
             var version = Environment.OSVersion.Version;
             if (version.Major == 10 && version.Minor == 0 && version.Build < 22000)
             {
@@ -2474,7 +2687,6 @@ namespace HomeworkViewer
 
         private void OnFormClosing(object sender, FormClosingEventArgs e)
         {
-            // 允许直接关闭
         }
 
         protected override void OnFormClosed(FormClosedEventArgs e)

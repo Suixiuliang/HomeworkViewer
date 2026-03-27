@@ -70,6 +70,7 @@ namespace HomeworkViewer
         private Button btnCancel;
         private AppConfig config;
         private HomeworkViewer mainForm;
+        private CheckBox chkEnableMarkdown;
 
         private int _selectedPage = 0;
         private Version _currentVersion;
@@ -189,7 +190,7 @@ namespace HomeworkViewer
                         }));
                     }
                 }
-                catch (HttpRequestException ex) when (url != originalUrl)
+                catch (HttpRequestException _) when (url != originalUrl)  // 变量未使用，改为 _
                 {
                     try
                     {
@@ -734,7 +735,7 @@ namespace HomeworkViewer
             {
                 Dock = DockStyle.Top,
                 ColumnCount = 2,
-                RowCount = 6,
+                RowCount = 7, // 原本为8，去掉颜色功能后为7
                 Padding = new Padding(0),
                 AutoSize = true,
                 BackColor = Color.Transparent
@@ -742,6 +743,7 @@ namespace HomeworkViewer
             layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 100));
             layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
 
+            // 卡片透明度（行0）
             Label lblCardOpacity = new Label { Text = "卡片透明度:", TextAlign = ContentAlignment.MiddleRight, ForeColor = Color.White, BackColor = Color.Transparent, AutoSize = true };
             layout.Controls.Add(lblCardOpacity, 0, 0);
             Panel cardPanel = new Panel { Height = 30, Width = 250, BackColor = Color.Transparent };
@@ -753,6 +755,7 @@ namespace HomeworkViewer
             cardPanel.Controls.Add(numCardOpacity);
             layout.Controls.Add(cardPanel, 1, 0);
 
+            // 背景透明度（行1）
             Label lblBgOpacity = new Label { Text = "背景透明度:", TextAlign = ContentAlignment.MiddleRight, ForeColor = Color.White, BackColor = Color.Transparent, AutoSize = true };
             layout.Controls.Add(lblBgOpacity, 0, 1);
             Panel bgPanel = new Panel { Height = 30, Width = 250, BackColor = Color.Transparent };
@@ -764,6 +767,7 @@ namespace HomeworkViewer
             bgPanel.Controls.Add(numBgOpacity);
             layout.Controls.Add(bgPanel, 1, 1);
 
+            // 字体颜色（行2）
             Label lblFontColor = new Label { Text = "字体颜色:", TextAlign = ContentAlignment.MiddleRight, ForeColor = Color.White, BackColor = Color.Transparent, AutoSize = true };
             layout.Controls.Add(lblFontColor, 0, 2);
             FlowLayoutPanel colorPanel = new FlowLayoutPanel { FlowDirection = FlowDirection.LeftToRight, Height = 30, Width = 200, BackColor = Color.Transparent };
@@ -773,6 +777,7 @@ namespace HomeworkViewer
             colorPanel.Controls.Add(rbWhite);
             layout.Controls.Add(colorPanel, 1, 2);
 
+            // 顶部条颜色（行3）
             Label lblBarColor = new Label { Text = "顶部条颜色:", TextAlign = ContentAlignment.MiddleRight, ForeColor = Color.White, BackColor = Color.Transparent, AutoSize = true };
             layout.Controls.Add(lblBarColor, 0, 3);
             FlowLayoutPanel barColorPanel = new FlowLayoutPanel { FlowDirection = FlowDirection.LeftToRight, Height = 30, Width = 250, BackColor = Color.Transparent };
@@ -783,7 +788,7 @@ namespace HomeworkViewer
             barColorPanel.Controls.Add(pnlBarColorPreview);
             layout.Controls.Add(barColorPanel, 1, 3);
 
-            // 背景效果
+            // 背景效果（行4）
             Label lblBgEffect = new Label { Text = "背景效果:", TextAlign = ContentAlignment.MiddleRight, ForeColor = Color.White, BackColor = Color.Transparent, AutoSize = true };
             layout.Controls.Add(lblBgEffect, 0, 4);
             cmbBgEffect = new ComboBox
@@ -797,6 +802,19 @@ namespace HomeworkViewer
             cmbBgEffect.Items.AddRange(new object[] { "Mica", "Acrylic", "Aero" });
             cmbBgEffect.SelectedItem = config.BackgroundEffect;
             layout.Controls.Add(cmbBgEffect, 1, 4);
+
+            // 新增：Markdown 渲染选项（行5）
+            Label lblMarkdown = new Label { Text = "MD渲染:", TextAlign = ContentAlignment.MiddleRight, ForeColor = Color.White, BackColor = Color.Transparent, AutoSize = true };
+            layout.Controls.Add(lblMarkdown, 0, 5);
+            chkEnableMarkdown = new CheckBox
+            {
+                Text = "启用 Markdown 渲染",
+                Checked = config.EnableMarkdown,
+                AutoSize = true,
+                ForeColor = Color.White,
+                BackColor = Color.Transparent
+            };
+            layout.Controls.Add(chkEnableMarkdown, 1, 5);
 
             appearancePanel.Controls.Add(layout);
         }
@@ -1005,7 +1023,7 @@ namespace HomeworkViewer
                 AutoSize = true,
                 BackColor = Color.Transparent
             };
-            Label lblVersion = new Label { Text = "作业展板 版本 1.4.5", Font = new Font("微软雅黑", 12, FontStyle.Bold), AutoSize = true, ForeColor = Color.White, BackColor = Color.Transparent };
+            Label lblVersion = new Label { Text = "作业展板 版本 1.5.0（测试版）", Font = new Font("微软雅黑", 12, FontStyle.Bold), AutoSize = true, ForeColor = Color.White, BackColor = Color.Transparent };
             layout.Controls.Add(lblVersion, 0, 0);
             Label lblAuthor = new Label { Text = "\n作者: MaxSui 隋修梁", AutoSize = true, ForeColor = Color.White, BackColor = Color.Transparent, Font = new Font("微软雅黑", 10) };
             layout.Controls.Add(lblAuthor, 0, 1);
@@ -1079,8 +1097,6 @@ namespace HomeworkViewer
             layout.Controls.Add(lblUpdateContent, 0, 8);
 
             aboutPanel.Controls.Add(layout);
-            
-            // 移除立即调用的镜像检测，改为在 Load 事件中执行
         }
 
         private async Task UpdateMirrorStatusAsync(Label statusLabel)
@@ -1140,6 +1156,7 @@ namespace HomeworkViewer
             config.FontColorWhite = rbWhite.Checked;
             config.ScrollSpeed = (int)numScrollSpeed.Value;
             config.BackgroundEffect = cmbBgEffect.SelectedItem?.ToString() ?? "Mica";
+            config.EnableMarkdown = chkEnableMarkdown.Checked;
 
             config.EveningClassCount = (int)numEveningCount.Value;
             config.EveningClassTimes.Clear();
@@ -1156,6 +1173,13 @@ namespace HomeworkViewer
             }
 
             config.Save();
+
+            // 如果启用了 Markdown 渲染，提示重启
+            if (chkEnableMarkdown.Checked)
+            {
+                MessageBox.Show("您已启用实验性功能，可能某些功能无法按照预期工作。", "风险提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+
             mainForm.ApplySettings(config);
             this.DialogResult = DialogResult.OK;
             this.Close();

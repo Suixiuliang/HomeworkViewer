@@ -30,8 +30,13 @@ namespace HomeworkViewer
 
         public string BackgroundEffect { get; set; } = "Mica";
 
-        // 新增：更新待处理标志
         public int UpdatePending { get; set; } = 0;
+
+        // 是否启用 Markdown 渲染
+        public bool EnableMarkdown { get; set; } = false;
+
+        // 是否启用颜色功能
+        public bool EnableColor { get; set; } = false;
 
         private static string GetConfigPath()
         {

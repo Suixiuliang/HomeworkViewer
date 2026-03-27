@@ -6,12 +6,16 @@
     <Nullable>enable</Nullable>
     <UseWindowsForms>true</UseWindowsForms>
     <ImplicitUsings>enable</ImplicitUsings>
-    <Version>1.4.5</Version>
+    <Version>1.5.0</Version>
     <ApplicationIcon>bin\Debug\net10.0-windows\Slide\HIcon.ico</ApplicationIcon>
   </PropertyGroup>
 
   <ItemGroup>
     <Content Include="bin\Debug\net10.0-windows\Slide\HIcon.ico" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Markdig" Version="1.1.1" />
   </ItemGroup>
 
 </Project>

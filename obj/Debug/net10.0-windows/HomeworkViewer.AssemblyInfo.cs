@@ -12,11 +12,11 @@ using System.Reflection;
 
 [assembly: System.Reflection.AssemblyCompanyAttribute("HomeworkViewer")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
-[assembly: System.Reflection.AssemblyFileVersionAttribute("1.3.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.3.0+67a900465e15efd7a9f9c8342fd527d77e1589e2")]
+[assembly: System.Reflection.AssemblyFileVersionAttribute("1.4.5.0")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.4.5+4f976e17cda96e5e3fe8da4d95904e7f0155118f")]
 [assembly: System.Reflection.AssemblyProductAttribute("HomeworkViewer")]
 [assembly: System.Reflection.AssemblyTitleAttribute("HomeworkViewer")]
-[assembly: System.Reflection.AssemblyVersionAttribute("1.3.0.0")]
+[assembly: System.Reflection.AssemblyVersionAttribute("1.4.5.0")]
 [assembly: System.Runtime.Versioning.TargetPlatformAttribute("Windows7.0")]
 [assembly: System.Runtime.Versioning.SupportedOSPlatformAttribute("Windows7.0")]
 

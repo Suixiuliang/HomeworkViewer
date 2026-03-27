@@ -2,6 +2,19 @@
   "version": 3,
   "targets": {
     "net10.0-windows7.0": {
+      "Markdig/1.1.1": {
+        "type": "package",
+        "compile": {
+          "lib/net10.0/Markdig.dll": {
+            "related": ".xml"
+          }
+        },
+        "runtime": {
+          "lib/net10.0/Markdig.dll": {
+            "related": ".xml"
+          }
+        }
+      },
       "Microsoft.NET.ILLink.Tasks/10.0.3": {
         "type": "package",
         "build": {
@@ -10,6 +23,19 @@
       }
     },
     "net10.0-windows7.0/win-x64": {
+      "Markdig/1.1.1": {
+        "type": "package",
+        "compile": {
+          "lib/net10.0/Markdig.dll": {
+            "related": ".xml"
+          }
+        },
+        "runtime": {
+          "lib/net10.0/Markdig.dll": {
+            "related": ".xml"
+          }
+        }
+      },
       "Microsoft.NET.ILLink.Tasks/10.0.3": {
         "type": "package",
         "build": {
@@ -19,6 +45,29 @@
     }
   },
   "libraries": {
+    "Markdig/1.1.1": {
+      "sha512": "wACpji8aLjtmghzdancNFRDUH66F2kS8QE0uywUXvLHgfbTD7LPNj7Vx43sTckpEQFtn5YndEoZvGqIHosBzGQ==",
+      "type": "package",
+      "path": "markdig/1.1.1",
+      "files": [
+        ".nupkg.metadata",
+        ".signature.p7s",
+        "lib/net10.0/Markdig.dll",
+        "lib/net10.0/Markdig.xml",
+        "lib/net462/Markdig.dll",
+        "lib/net462/Markdig.xml",
+        "lib/net8.0/Markdig.dll",
+        "lib/net8.0/Markdig.xml",
+        "lib/netstandard2.0/Markdig.dll",
+        "lib/netstandard2.0/Markdig.xml",
+        "lib/netstandard2.1/Markdig.dll",
+        "lib/netstandard2.1/Markdig.xml",
+        "markdig.1.1.1.nupkg.sha512",
+        "markdig.nuspec",
+        "markdig.png",
+        "readme.md"
+      ]
+    },
     "Microsoft.NET.ILLink.Tasks/10.0.3": {
       "sha512": "0B6nZyCHWXnvmlB559oduOspVdNOnpNXPjhpWVMovLPAsDVG7A4jJR9rzECf67JUzxP8/ee/wA8clwIzJcWNFA==",
       "type": "package",
@@ -72,6 +121,7 @@
   },
   "projectFileDependencyGroups": {
     "net10.0-windows7.0": [
+      "Markdig >= 1.1.1",
       "Microsoft.NET.ILLink.Tasks >= 10.0.3"
     ]
   },
@@ -79,7 +129,7 @@
     "C:\\Users\\Administrator\\.nuget\\packages\\": {}
   },
   "project": {
-    "version": "1.4.5",
+    "version": "1.5.0",
     "restore": {
       "projectUniqueName": "D:\\Administrator\\Documents\\GitHub\\HomeworkViewer\\HomeworkViewer.csproj",
       "projectName": "HomeworkViewer",
@@ -120,6 +170,10 @@
       "net10.0-windows7.0": {
         "targetAlias": "net10.0-windows",
         "dependencies": {
+          "Markdig": {
+            "target": "Package",
+            "version": "[1.1.1, )"
+          },
           "Microsoft.NET.ILLink.Tasks": {
             "suppressParent": "All",
             "target": "Package",

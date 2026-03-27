@@ -1,5 +1,5 @@
 {
-  "Version": "1.4.5",
+  "Version": "1.5.0",
   "ReleaseType": "Stable",
   "IsMandatory": "1",
   "Hash": "sha256:f11dafff5afe5cf3e71253a21b688b07addcd516d53e32f3d0b91a9efdfaacad",
