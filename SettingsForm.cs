@@ -9,6 +9,7 @@ using System.Threading.Tasks;
 using System.Reflection;
 using System.Diagnostics;
 using System.Linq;
+using System.IO;
 
 namespace HomeworkViewer
 {
@@ -50,13 +51,19 @@ namespace HomeworkViewer
         private FlowLayoutPanel eveningPanel;
         private List<DateTimePicker> startPickers = new List<DateTimePicker>();
         private List<DateTimePicker> endPickers = new List<DateTimePicker>();
-        // 以下按钮已隐藏，但保留字段以避免修改过多，实际不可见
         private Button btnTestFlash;
         private Button btnStopFlash;
 
         private FlowLayoutPanel repsPanel;
         private List<TextBox> repTextboxes = new List<TextBox>();
         private List<string> currentSubjectsForReps = new List<string>();
+
+        // 字体相关
+        private ComboBox cmbFontFamily;
+        private Button btnSelectCustomFont;
+
+        // 导出相关
+        private ComboBox cmbDefaultExportFormat;
 
         private Button btnCheckUpdate;
         private Button btnSkipVersion;
@@ -94,7 +101,6 @@ namespace HomeworkViewer
             this.ForeColor = Color.White;
             GetCurrentVersion();
 
-            // 确保镜像检测在窗体加载后执行（句柄已创建）
             this.Load += (s, e) => { _ = UpdateMirrorStatusAsync(lblMirrorStatus); };
         }
 
@@ -140,7 +146,6 @@ namespace HomeworkViewer
                     client.Timeout = TimeSpan.FromSeconds(5);
                     string json = await client.GetStringAsync(url);
 
-                    // 数组格式 ["1.3.0", "Stable", "0", "sha256:xxx", "https://..."]
                     try
                     {
                         var parts = JsonSerializer.Deserialize<string[]>(json);
@@ -161,7 +166,6 @@ namespace HomeworkViewer
                     }
                     catch { }
 
-                    // 对象格式
                     try
                     {
                         var obj = JsonSerializer.Deserialize<Dictionary<string, string>>(json);
@@ -190,7 +194,7 @@ namespace HomeworkViewer
                         }));
                     }
                 }
-                catch (HttpRequestException _) when (url != originalUrl)  // 变量未使用，改为 _
+                catch (HttpRequestException _) when (url != originalUrl)
                 {
                     try
                     {
@@ -294,7 +298,6 @@ namespace HomeworkViewer
                             bool isMandatory = remoteInfo.IsMandatory == "0";
                             if (isMandatory)
                             {
-                                // 强制更新：优先使用直链下载
                                 if (!string.IsNullOrEmpty(remoteInfo.DownloadUrl))
                                 {
                                     btnCheckUpdate.Text = "准备下载...";
@@ -588,7 +591,7 @@ namespace HomeworkViewer
         private void InitializeComponent()
         {
             this.Text = "设置";
-            this.Size = new Size(650, 650);
+            this.Size = new Size(650, 700);
             this.StartPosition = FormStartPosition.CenterParent;
             this.FormBorderStyle = FormBorderStyle.FixedDialog;
             this.MaximizeBox = false;
@@ -697,7 +700,7 @@ namespace HomeworkViewer
             {
                 Dock = DockStyle.Top,
                 ColumnCount = 2,
-                RowCount = 4,
+                RowCount = 5,
                 Padding = new Padding(0),
                 AutoSize = true,
                 BackColor = Color.Transparent
@@ -722,6 +725,20 @@ namespace HomeworkViewer
             numScrollSpeed = new NumericUpDown { Minimum = 0, Maximum = 200, Value = config.ScrollSpeed, Width = 60, BackColor = Color.FromArgb(64, 64, 64), ForeColor = Color.White };
             layout.Controls.Add(numScrollSpeed, 1, 2);
 
+            Label lblExportFormat = new Label { Text = "默认导出格式:", TextAlign = ContentAlignment.MiddleRight, ForeColor = Color.White, BackColor = Color.Transparent, AutoSize = true };
+            layout.Controls.Add(lblExportFormat, 0, 3);
+            cmbDefaultExportFormat = new ComboBox
+            {
+                DropDownStyle = ComboBoxStyle.DropDownList,
+                Width = 150,
+                BackColor = Color.FromArgb(64, 64, 64),
+                ForeColor = Color.White,
+                FlatStyle = FlatStyle.Flat
+            };
+            cmbDefaultExportFormat.Items.AddRange(new object[] { "txt", "pdf", "jpg", "html" });
+            cmbDefaultExportFormat.SelectedItem = config.ExportFormat;
+            layout.Controls.Add(cmbDefaultExportFormat, 1, 3);
+
             basicPanel.Controls.Add(layout);
         }
         private void ShowBasicPage() => contentPanel.Controls.Add(basicPanel);
@@ -735,7 +752,7 @@ namespace HomeworkViewer
             {
                 Dock = DockStyle.Top,
                 ColumnCount = 2,
-                RowCount = 7, // 原本为8，去掉颜色功能后为7
+                RowCount = 8,
                 Padding = new Padding(0),
                 AutoSize = true,
                 BackColor = Color.Transparent
@@ -743,7 +760,7 @@ namespace HomeworkViewer
             layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 100));
             layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
 
-            // 卡片透明度（行0）
+            // 卡片透明度
             Label lblCardOpacity = new Label { Text = "卡片透明度:", TextAlign = ContentAlignment.MiddleRight, ForeColor = Color.White, BackColor = Color.Transparent, AutoSize = true };
             layout.Controls.Add(lblCardOpacity, 0, 0);
             Panel cardPanel = new Panel { Height = 30, Width = 250, BackColor = Color.Transparent };
@@ -755,7 +772,7 @@ namespace HomeworkViewer
             cardPanel.Controls.Add(numCardOpacity);
             layout.Controls.Add(cardPanel, 1, 0);
 
-            // 背景透明度（行1）
+            // 背景透明度
             Label lblBgOpacity = new Label { Text = "背景透明度:", TextAlign = ContentAlignment.MiddleRight, ForeColor = Color.White, BackColor = Color.Transparent, AutoSize = true };
             layout.Controls.Add(lblBgOpacity, 0, 1);
             Panel bgPanel = new Panel { Height = 30, Width = 250, BackColor = Color.Transparent };
@@ -767,7 +784,7 @@ namespace HomeworkViewer
             bgPanel.Controls.Add(numBgOpacity);
             layout.Controls.Add(bgPanel, 1, 1);
 
-            // 字体颜色（行2）
+            // 字体颜色
             Label lblFontColor = new Label { Text = "字体颜色:", TextAlign = ContentAlignment.MiddleRight, ForeColor = Color.White, BackColor = Color.Transparent, AutoSize = true };
             layout.Controls.Add(lblFontColor, 0, 2);
             FlowLayoutPanel colorPanel = new FlowLayoutPanel { FlowDirection = FlowDirection.LeftToRight, Height = 30, Width = 200, BackColor = Color.Transparent };
@@ -777,7 +794,7 @@ namespace HomeworkViewer
             colorPanel.Controls.Add(rbWhite);
             layout.Controls.Add(colorPanel, 1, 2);
 
-            // 顶部条颜色（行3）
+            // 顶部条颜色
             Label lblBarColor = new Label { Text = "顶部条颜色:", TextAlign = ContentAlignment.MiddleRight, ForeColor = Color.White, BackColor = Color.Transparent, AutoSize = true };
             layout.Controls.Add(lblBarColor, 0, 3);
             FlowLayoutPanel barColorPanel = new FlowLayoutPanel { FlowDirection = FlowDirection.LeftToRight, Height = 30, Width = 250, BackColor = Color.Transparent };
@@ -788,7 +805,7 @@ namespace HomeworkViewer
             barColorPanel.Controls.Add(pnlBarColorPreview);
             layout.Controls.Add(barColorPanel, 1, 3);
 
-            // 背景效果（行4）
+            // 背景效果
             Label lblBgEffect = new Label { Text = "背景效果:", TextAlign = ContentAlignment.MiddleRight, ForeColor = Color.White, BackColor = Color.Transparent, AutoSize = true };
             layout.Controls.Add(lblBgEffect, 0, 4);
             cmbBgEffect = new ComboBox
@@ -803,12 +820,12 @@ namespace HomeworkViewer
             cmbBgEffect.SelectedItem = config.BackgroundEffect;
             layout.Controls.Add(cmbBgEffect, 1, 4);
 
-            // 新增：Markdown 渲染选项（行5）
-            Label lblMarkdown = new Label { Text = "MD渲染:", TextAlign = ContentAlignment.MiddleRight, ForeColor = Color.White, BackColor = Color.Transparent, AutoSize = true };
+            // Markdown 渲染
+            Label lblMarkdown = new Label { Text = "Markdown 渲染:", TextAlign = ContentAlignment.MiddleRight, ForeColor = Color.White, BackColor = Color.Transparent, AutoSize = true };
             layout.Controls.Add(lblMarkdown, 0, 5);
             chkEnableMarkdown = new CheckBox
             {
-                Text = "启用 Markdown 渲染",
+                Text = "启用 Markdown 渲染（不稳定）",
                 Checked = config.EnableMarkdown,
                 AutoSize = true,
                 ForeColor = Color.White,
@@ -816,8 +833,67 @@ namespace HomeworkViewer
             };
             layout.Controls.Add(chkEnableMarkdown, 1, 5);
 
+            // 字体选择
+            Label lblFontFamily = new Label { Text = "字体:", TextAlign = ContentAlignment.MiddleRight, ForeColor = Color.White, BackColor = Color.Transparent, AutoSize = true };
+            layout.Controls.Add(lblFontFamily, 0, 6);
+            FlowLayoutPanel fontPanel = new FlowLayoutPanel { FlowDirection = FlowDirection.LeftToRight, Height = 30, Width = 250, BackColor = Color.Transparent };
+            cmbFontFamily = new ComboBox
+            {
+                DropDownStyle = ComboBoxStyle.DropDownList,
+                Width = 150,
+                BackColor = Color.FromArgb(64, 64, 64),
+                ForeColor = Color.White,
+                FlatStyle = FlatStyle.Flat
+            };
+            cmbFontFamily.Items.AddRange(new object[] { "微软雅黑", "黑体", "楷体", "苹方", "自定义" });
+            cmbFontFamily.SelectedItem = config.IsCustomFont ? "自定义" : config.FontFamily;
+            btnSelectCustomFont = new Button
+            {
+                Text = "选择字体文件",
+                Width = 100,
+                Height = 25,
+                Visible = false,
+                BackColor = Color.FromArgb(64, 64, 64),
+                ForeColor = Color.White,
+                FlatStyle = FlatStyle.Flat
+            };
+            btnSelectCustomFont.Click += BtnSelectCustomFont_Click;
+            cmbFontFamily.SelectedIndexChanged += (s, e) =>
+            {
+                btnSelectCustomFont.Visible = cmbFontFamily.SelectedItem?.ToString() == "自定义";
+            };
+            fontPanel.Controls.Add(cmbFontFamily);
+            fontPanel.Controls.Add(btnSelectCustomFont);
+            layout.Controls.Add(fontPanel, 1, 6);
+
             appearancePanel.Controls.Add(layout);
         }
+
+        private void BtnSelectCustomFont_Click(object sender, EventArgs e)
+        {
+            using (OpenFileDialog ofd = new OpenFileDialog())
+            {
+                ofd.Filter = "字体文件|*.ttf;*.ttc";
+                ofd.Title = "选择自定义字体文件";
+                if (ofd.ShowDialog() == DialogResult.OK)
+                {
+                    string destPath = Path.Combine(Application.StartupPath, "selfdeffont" + Path.GetExtension(ofd.FileName));
+                    try
+                    {
+                        File.Copy(ofd.FileName, destPath, true);
+                        config.FontFamily = destPath;
+                        config.IsCustomFont = true;
+                        FontManager.LoadCustomFont(destPath);
+                        MessageBox.Show("自定义字体已加载，重启应用后生效。", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    }
+                    catch (Exception ex)
+                    {
+                        MessageBox.Show($"字体复制失败：{ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    }
+                }
+            }
+        }
+
         private void BtnBarColor_Click(object sender, EventArgs e)
         {
             Color currentColor = ParseColor(config.BarColor, Color.Yellow);
@@ -890,10 +966,8 @@ namespace HomeworkViewer
                 BackColor = Color.Transparent,
                 Padding = new Padding(10, 10, 0, 0)
             };
-            // 测试闪烁按钮（隐藏）
             btnTestFlash = new Button { Text = "测试闪烁", Width = 100, Height = 30, BackColor = Color.FromArgb(64, 64, 64), ForeColor = Color.White, FlatStyle = FlatStyle.Flat, Visible = false };
             btnTestFlash.Click += BtnTestFlash_Click;
-            // 停止闪烁按钮（隐藏）
             btnStopFlash = new Button { Text = "停止闪烁", Width = 100, Height = 30, BackColor = Color.FromArgb(64, 64, 64), ForeColor = Color.White, FlatStyle = FlatStyle.Flat, Margin = new Padding(10, 0, 0, 0), Visible = false };
             btnStopFlash.Click += BtnStopFlash_Click;
 
@@ -1023,7 +1097,7 @@ namespace HomeworkViewer
                 AutoSize = true,
                 BackColor = Color.Transparent
             };
-            Label lblVersion = new Label { Text = "作业展板 版本 1.5.0（测试版）", Font = new Font("微软雅黑", 12, FontStyle.Bold), AutoSize = true, ForeColor = Color.White, BackColor = Color.Transparent };
+            Label lblVersion = new Label { Text = "作业展板 版本 1.5.5", Font = new Font("微软雅黑", 12, FontStyle.Bold), AutoSize = true, ForeColor = Color.White, BackColor = Color.Transparent };
             layout.Controls.Add(lblVersion, 0, 0);
             Label lblAuthor = new Label { Text = "\n作者: MaxSui 隋修梁", AutoSize = true, ForeColor = Color.White, BackColor = Color.Transparent, Font = new Font("微软雅黑", 10) };
             layout.Controls.Add(lblAuthor, 0, 1);
@@ -1144,7 +1218,8 @@ namespace HomeworkViewer
             if (config.FontColorWhite) rbWhite.Checked = true; else rbBlack.Checked = true;
             pnlBarColorPreview.BackColor = ParseColor(config.BarColor, Color.Yellow);
             numScrollSpeed.Value = config.ScrollSpeed;
-            // 背景效果已在控件创建时从config加载
+            cmbDefaultExportFormat.SelectedItem = config.ExportFormat;
+            cmbFontFamily.SelectedItem = config.IsCustomFont ? "自定义" : config.FontFamily;
         }
 
         private void BtnOK_Click(object sender, EventArgs e)
@@ -1157,6 +1232,18 @@ namespace HomeworkViewer
             config.ScrollSpeed = (int)numScrollSpeed.Value;
             config.BackgroundEffect = cmbBgEffect.SelectedItem?.ToString() ?? "Mica";
             config.EnableMarkdown = chkEnableMarkdown.Checked;
+            config.ExportFormat = cmbDefaultExportFormat.SelectedItem?.ToString() ?? "txt";
+
+            string fontSelection = cmbFontFamily.SelectedItem?.ToString();
+            if (fontSelection == "自定义")
+            {
+                config.IsCustomFont = true;
+            }
+            else
+            {
+                config.IsCustomFont = false;
+                config.FontFamily = fontSelection;
+            }
 
             config.EveningClassCount = (int)numEveningCount.Value;
             config.EveningClassTimes.Clear();
@@ -1174,12 +1261,7 @@ namespace HomeworkViewer
 
             config.Save();
 
-            // 如果启用了 Markdown 渲染，提示重启
-            if (chkEnableMarkdown.Checked)
-            {
-                MessageBox.Show("您已启用实验性功能，可能某些功能无法按照预期工作。", "风险提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
-            }
-
+            // 移除 Markdown 启用时的对话框
             mainForm.ApplySettings(config);
             this.DialogResult = DialogResult.OK;
             this.Close();

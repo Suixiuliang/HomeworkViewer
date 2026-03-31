@@ -12,8 +12,6 @@ namespace HomeworkViewer
         public Dictionary<string, string> ClassReps { get; set; } = new Dictionary<string, string>();
         public Dictionary<string, string> Teachers { get; set; } = new Dictionary<string, string>();
         public Dictionary<string, string> DueTimes { get; set; } = new Dictionary<string, string>();
-        
-        // 未交名单，科目 -> 名单文本
         public Dictionary<string, string> Unsubmitted { get; set; } = new Dictionary<string, string>();
 
         public static readonly string[] SubjectNames = { "语文", "数学", "英语", "物理", "化学", "生物", "政治", "历史", "地理" };
@@ -66,6 +64,17 @@ namespace HomeworkViewer
                 }
             }
             dates.Sort((a, b) => b.CompareTo(a));
+            return dates;
+        }
+
+        public List<DateTime> GetDatesInRange(DateTime start, DateTime end)
+        {
+            var dates = new List<DateTime>();
+            for (var dt = start; dt <= end; dt = dt.AddDays(1))
+            {
+                if (File.Exists(GetFilePath(dt)))
+                    dates.Add(dt);
+            }
             return dates;
         }
     }

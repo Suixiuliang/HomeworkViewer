@@ -58,8 +58,8 @@ namespace HomeworkViewer
         private DateTime? historyDate = null;
 
         // 按钮矩形
-        private Rectangle rotateBtnRect, editBtnRect, historyBtnRect, fullscreenBtnRect, backBtnRect, leftArrowRect, rightArrowRect, settingsBtnRect, unsubmittedBtnRect, minimizeBtnRect, closeBtnRect;
-        private Rectangle expandBtnRect, collapseBtnRect;  // 收纳相关
+        private Rectangle rotateBtnRect, editBtnRect, historyBtnRect, fullscreenBtnRect, backBtnRect, leftArrowRect, rightArrowRect, settingsBtnRect, unsubmittedBtnRect, minimizeBtnRect, closeBtnRect, exportBtnRect;
+        private Rectangle expandBtnRect, collapseBtnRect;
 
         // 网格矩形
         private List<Rectangle> gridRects = new List<Rectangle>();
@@ -109,6 +109,7 @@ namespace HomeworkViewer
         private bool _closePressed = false;
         private bool _expandPressed = false;
         private bool _collapsePressed = false;
+        private bool _exportPressed = false;
 
         // 收纳状态
         private bool _buttonsExpanded = false;
@@ -157,6 +158,19 @@ namespace HomeworkViewer
         private DateTime _markdownPauseStart = DateTime.Now;
         private float _markdownTotalHeight = 0;
 
+        // 行列调整相关
+        private ResizeHelper _resizeHelper;
+        private int[] _rowHeights = new int[2];   // 最多2行
+        private int[] _colWidths = new int[3];    // 固定3列
+        private bool _isResizing = false;
+        private int _resizeTargetRow = -1;
+        private int _resizeTargetCol = -1;
+        private int _resizeStartX, _resizeStartY;
+        private int _originalHeight, _originalWidth;
+
+        // 导出相关
+        private Button exportBtn;
+
         public HomeworkViewer()
         {
             SETTINGS_BTN_POS = new Point(ROTATE_BTN_POS.X - BTN_SQUARE_SIZE - 10, 13);
@@ -202,6 +216,7 @@ namespace HomeworkViewer
             this.Load += OnLoad;
             this.Activated += OnActivated;
             this.FormClosing += OnFormClosing;
+            this.KeyDown += OnKeyDown;
 
             InitializeModeComboBox();
 
@@ -209,6 +224,19 @@ namespace HomeworkViewer
             ApplyBackgroundEffect(appConfig.BackgroundEffect);
 
             CheckEveningClassStates();
+
+            // 初始化行列调整
+            _rowHeights[0] = _rowHeights[1] = 0; // 0表示自动
+            _colWidths[0] = _colWidths[1] = _colWidths[2] = 0;
+        }
+
+        private void OnKeyDown(object sender, KeyEventArgs e)
+        {
+            if (e.KeyCode == Keys.F11)
+            {
+                ToggleFullscreen();
+                e.Handled = true;
+            }
         }
 
         private void CheckWindowsVersion()
@@ -433,7 +461,22 @@ namespace HomeworkViewer
             fontSmall?.Dispose();
 
             float scale = fontScales[appConfig.FontSizeLevel];
-            string fontName = "微软雅黑";
+            string fontName = appConfig.FontFamily;
+            if (appConfig.IsCustomFont)
+            {
+                // 使用自定义字体
+                Font customFont = FontManager.GetCustomFont(20 * scale);
+                font30 = new Font(customFont.FontFamily, 20 * scale);
+                font22 = new Font(customFont.FontFamily, 21 * scale, FontStyle.Bold);
+                font12 = new Font(customFont.FontFamily, 10 * scale);
+                font20 = new Font(customFont.FontFamily, 15 * scale);
+                font24 = new Font(customFont.FontFamily, 14 * scale);
+                font36 = new Font(customFont.FontFamily, 35 * scale);
+                hintFont = new Font(customFont.FontFamily, 15 * scale);
+                buttonFont = new Font(customFont.FontFamily, 10 * scale);
+                fontSmall = new Font(customFont.FontFamily, 8 * scale);
+                return;
+            }
 
             font12 = new Font(fontName, 10 * scale);
             font20 = new Font(fontName, 15 * scale);
@@ -515,8 +558,18 @@ namespace HomeworkViewer
 
             float areaWidth = GRID_AREA.Width;
             float areaHeight = GRID_AREA.Height;
-            float rectWidth = (areaWidth - (cols + 1) * GRID_PADDING) / cols;
-            float rectHeight = (areaHeight - (rows + 1) * GRID_PADDING) / rows;
+
+            // 如果用户自定义了行高/列宽，使用自定义值
+            float rectWidth, rectHeight;
+            if (appConfig.ColumnWidth > 0)
+                rectWidth = appConfig.ColumnWidth;
+            else
+                rectWidth = (areaWidth - (cols + 1) * GRID_PADDING) / cols;
+
+            if (appConfig.RowHeight > 0)
+                rectHeight = appConfig.RowHeight;
+            else
+                rectHeight = (areaHeight - (rows + 1) * GRID_PADDING) / rows;
 
             for (int row = 0; row < rows; row++)
             {
@@ -612,7 +665,7 @@ namespace HomeworkViewer
             Point virtualPos = MapToVirtual(e.Location);
             int x = virtualPos.X, y = virtualPos.Y;
 
-            _settingsPressed = _rotatePressed = _editPressed = _historyPressed = _fullscreenPressed = _backPressed = _unsubmittedPressed = _minimizePressed = _closePressed = _expandPressed = _collapsePressed = false;
+            _settingsPressed = _rotatePressed = _editPressed = _historyPressed = _fullscreenPressed = _backPressed = _unsubmittedPressed = _minimizePressed = _closePressed = _expandPressed = _collapsePressed = _exportPressed = false;
 
             if (rotationMode || unsubmittedMode)
             {
@@ -624,6 +677,8 @@ namespace HomeworkViewer
                     _historyPressed = true;
                 if (fullscreenBtnRect.Contains(x, y))
                     _fullscreenPressed = true;
+                if (exportBtnRect.Contains(x, y))
+                    _exportPressed = true;
             }
             else
             {
@@ -658,6 +713,8 @@ namespace HomeworkViewer
                         _rotatePressed = true;
                     else if (unsubmittedBtnRect.Contains(x, y))
                         _unsubmittedPressed = true;
+                    else if (exportBtnRect.Contains(x, y))
+                        _exportPressed = true;
                     else if (editBtnRect.Contains(x, y))
                         _editPressed = true;
                     else if (historyBtnRect.Contains(x, y))
@@ -670,18 +727,71 @@ namespace HomeworkViewer
                         _closePressed = true;
                 }
             }
+
+            // 检测是否在网格线附近进行行列调整
+            if (!rotationMode && !unsubmittedMode && !editMode)
+            {
+                for (int i = 0; i < gridRects.Count; i++)
+                {
+                    var rect = gridRects[i];
+                    int col = i % 3;
+                    int row = i / 3;
+                    // 检测右边界
+                    if (Math.Abs(x - rect.Right) < 5 && col < 2)
+                    {
+                        _isResizing = true;
+                        _resizeTargetCol = col;
+                        _resizeStartX = x;
+                        _originalWidth = rect.Width;
+                        break;
+                    }
+                    // 检测下边界
+                    if (Math.Abs(y - rect.Bottom) < 5 && row < 1)
+                    {
+                        _isResizing = true;
+                        _resizeTargetRow = row;
+                        _resizeStartY = y;
+                        _originalHeight = rect.Height;
+                        break;
+                    }
+                }
+            }
+
             Invalidate();
         }
 
         private void OnMouseUp(object sender, MouseEventArgs e)
         {
-            _settingsPressed = _rotatePressed = _editPressed = _historyPressed = _fullscreenPressed = _backPressed = _unsubmittedPressed = _minimizePressed = _closePressed = _expandPressed = _collapsePressed = false;
+            if (_isResizing)
+            {
+                _isResizing = false;
+                // 保存调整后的尺寸到配置
+                if (_resizeTargetCol >= 0)
+                {
+                    int newWidth = _originalWidth + (e.X - _resizeStartX);
+                    if (newWidth > 100)
+                        appConfig.ColumnWidth = newWidth;
+                }
+                if (_resizeTargetRow >= 0)
+                {
+                    int newHeight = _originalHeight + (e.Y - _resizeStartY);
+                    if (newHeight > 80)
+                        appConfig.RowHeight = newHeight;
+                }
+                appConfig.Save();
+                CalculateGridRects();
+                Invalidate();
+                _resizeTargetCol = -1;
+                _resizeTargetRow = -1;
+            }
+
+            _settingsPressed = _rotatePressed = _editPressed = _historyPressed = _fullscreenPressed = _backPressed = _unsubmittedPressed = _minimizePressed = _closePressed = _expandPressed = _collapsePressed = _exportPressed = false;
             Invalidate();
         }
 
         private void OnMouseLeave(object sender, EventArgs e)
         {
-            _settingsPressed = _rotatePressed = _editPressed = _historyPressed = _fullscreenPressed = _backPressed = _unsubmittedPressed = _minimizePressed = _closePressed = _expandPressed = _collapsePressed = false;
+            _settingsPressed = _rotatePressed = _editPressed = _historyPressed = _fullscreenPressed = _backPressed = _unsubmittedPressed = _minimizePressed = _closePressed = _expandPressed = _collapsePressed = _exportPressed = false;
             Invalidate();
         }
 
@@ -855,6 +965,10 @@ namespace HomeworkViewer
                     if (EditMode) EditMode = false;
                     ToggleFullscreen();
                 }
+                else if (exportBtnRect.Contains(x, y))
+                {
+                    ShowExportDialog();
+                }
             }
             else if (unsubmittedMode)
             {
@@ -910,6 +1024,10 @@ namespace HomeworkViewer
                 {
                     if (EditMode) EditMode = false;
                     ToggleFullscreen();
+                }
+                else if (exportBtnRect.Contains(x, y))
+                {
+                    ShowExportDialog();
                 }
                 else if (EditMode)
                 {
@@ -1020,6 +1138,11 @@ namespace HomeworkViewer
                         Invalidate();
                         return;
                     }
+                    else if (exportBtnRect.Contains(x, y))
+                    {
+                        ShowExportDialog();
+                        return;
+                    }
                     else if (editBtnRect.Contains(x, y))
                     {
                         if (EditMode)
@@ -1089,6 +1212,161 @@ namespace HomeworkViewer
                         }
                     }
                 }
+            }
+        }
+
+        private void ShowExportDialog()
+        {
+            using (var dlg = new Form())
+            {
+                dlg.Text = "导出作业";
+                dlg.Size = new Size(400, 350);
+                dlg.StartPosition = FormStartPosition.CenterParent;
+                dlg.FormBorderStyle = FormBorderStyle.FixedDialog;
+                dlg.MaximizeBox = false;
+                dlg.MinimizeBox = false;
+                dlg.BackColor = Color.FromArgb(45, 45, 48);
+                dlg.ForeColor = Color.White;
+
+                CheckBox chkIncludeUnsubmitted = new CheckBox { Text = "包含未交名单", Location = new Point(20, 20), AutoSize = true, ForeColor = Color.White };
+                CheckBox chkRangeMode = new CheckBox { Text = "日期范围", Location = new Point(20, 50), AutoSize = true, ForeColor = Color.White };
+                DateTimePicker dtpStart = new DateTimePicker { Format = DateTimePickerFormat.Short, Location = new Point(150, 48), Width = 120, Visible = false };
+                Label lblTo = new Label { Text = "至", Location = new Point(280, 52), AutoSize = true, ForeColor = Color.White, Visible = false };
+                DateTimePicker dtpEnd = new DateTimePicker { Format = DateTimePickerFormat.Short, Location = new Point(310, 48), Width = 120, Visible = false };
+                ComboBox cmbFormat = new ComboBox
+                {
+                    DropDownStyle = ComboBoxStyle.DropDownList,
+                    Location = new Point(20, 100),
+                    Width = 150,
+                    BackColor = Color.FromArgb(64, 64, 64),
+                    ForeColor = Color.White
+                };
+                cmbFormat.Items.AddRange(new object[] { "txt", "pdf", "jpg", "html" });
+                cmbFormat.SelectedIndex = 0;
+
+                Button btnExport = new Button { Text = "导出", Location = new Point(20, 150), Width = 80, BackColor = Color.FromArgb(64, 64, 64), ForeColor = Color.White };
+                Button btnCancel = new Button { Text = "取消", Location = new Point(110, 150), Width = 80, BackColor = Color.FromArgb(64, 64, 64), ForeColor = Color.White };
+                Button btnShare = new Button { Text = "分享", Location = new Point(200, 150), Width = 80, BackColor = Color.FromArgb(64, 64, 64), ForeColor = Color.White };
+
+                chkRangeMode.CheckedChanged += (s, e) =>
+                {
+                    bool range = chkRangeMode.Checked;
+                    dtpStart.Visible = range;
+                    lblTo.Visible = range;
+                    dtpEnd.Visible = range;
+                };
+
+                btnExport.Click += async (s, e) =>
+                {
+                    string format = cmbFormat.SelectedItem.ToString();
+                    string fileName = $"作业_{DateTime.Now:yyyyMMdd_HHmmss}.{format}";
+                    string filePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Desktop), fileName);
+
+                    try
+                    {
+                        if (chkRangeMode.Checked)
+                        {
+                            // 范围导出
+                            var start = dtpStart.Value.Date;
+                            var end = dtpEnd.Value.Date;
+                            var dates = homeworkData.GetDatesInRange(start, end);
+                            if (dates.Count == 0)
+                            {
+                                MessageBox.Show("指定范围内没有作业数据。", "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                                return;
+                            }
+                            // 简单处理：导出所有日期的 txt 合并
+                            var sb = new System.Text.StringBuilder();
+                            foreach (var date in dates)
+                            {
+                                var data = HomeworkData.Load(date);
+                                sb.AppendLine($"===== {date:yyyy年MM月dd日} =====");
+                                sb.AppendLine();
+                                // 这里可以复用 ExportHelper 的单日逻辑
+                            }
+                            File.WriteAllText(filePath, sb.ToString(), System.Text.Encoding.UTF8);
+                        }
+                        else
+                        {
+                            // 导出当前日期
+                            var data = homeworkData;
+                            if (format == "txt")
+                                ExportHelper.ExportToTxt(data, currentDate, filePath, chkIncludeUnsubmitted.Checked);
+                            else if (format == "pdf")
+                            {
+                                string tempTxt = Path.GetTempFileName() + ".txt";
+                                ExportHelper.ExportToTxt(data, currentDate, tempTxt, chkIncludeUnsubmitted.Checked);
+                                ExportHelper.ExportToPdf(tempTxt, filePath);
+                                File.Delete(tempTxt);
+                            }
+                            else if (format == "jpg")
+                                ExportHelper.ExportToJpg(this, filePath);
+                            else if (format == "html")
+                                ExportHelper.ExportToHtml(data, currentDate, filePath, chkIncludeUnsubmitted.Checked);
+                        }
+
+                        MessageBox.Show($"导出成功：{filePath}", "完成", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                        dlg.DialogResult = DialogResult.OK;
+                        dlg.Close();
+                    }
+                    catch (Exception ex)
+                    {
+                        MessageBox.Show($"导出失败：{ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    }
+                };
+
+                btnShare.Click += async (s, e) =>
+                {
+                    // 先导出再分享
+                    string format = cmbFormat.SelectedItem.ToString();
+                    string fileName = $"作业_{DateTime.Now:yyyyMMdd_HHmmss}.{format}";
+                    string filePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Desktop), fileName);
+                    try
+                    {
+                        if (chkRangeMode.Checked)
+                        {
+                            // 范围导出暂不支持分享（简单处理）
+                            MessageBox.Show("暂不支持范围导出分享", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                            return;
+                        }
+                        var data = homeworkData;
+                        if (format == "txt")
+                            ExportHelper.ExportToTxt(data, currentDate, filePath, chkIncludeUnsubmitted.Checked);
+                        else if (format == "pdf")
+                        {
+                            string tempTxt = Path.GetTempFileName() + ".txt";
+                            ExportHelper.ExportToTxt(data, currentDate, tempTxt, chkIncludeUnsubmitted.Checked);
+                            ExportHelper.ExportToPdf(tempTxt, filePath);
+                            File.Delete(tempTxt);
+                        }
+                        else if (format == "jpg")
+                            ExportHelper.ExportToJpg(this, filePath);
+                        else if (format == "html")
+                            ExportHelper.ExportToHtml(data, currentDate, filePath, chkIncludeUnsubmitted.Checked);
+
+                        await ShareHelper.ShowShareUIAsync(filePath);
+                        dlg.DialogResult = DialogResult.OK;
+                        dlg.Close();
+                    }
+                    catch (Exception ex)
+                    {
+                        MessageBox.Show($"分享失败：{ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    }
+                };
+
+                btnCancel.Click += (s, e) => dlg.Close();
+
+                dlg.Controls.Add(chkIncludeUnsubmitted);
+                dlg.Controls.Add(chkRangeMode);
+                dlg.Controls.Add(dtpStart);
+                dlg.Controls.Add(lblTo);
+                dlg.Controls.Add(dtpEnd);
+                dlg.Controls.Add(cmbFormat);
+                dlg.Controls.Add(btnExport);
+                dlg.Controls.Add(btnShare);
+                dlg.Controls.Add(btnCancel);
+
+                dlg.ShowDialog(this);
             }
         }
 
@@ -1278,7 +1556,7 @@ namespace HomeworkViewer
         // ---------- 图片加载 ----------
         private void LoadImages()
         {
-            string imagePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Slide");
+            string imagePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Resources");
             buttonImage = LoadImage(Path.Combine(imagePath, "按钮.png"), new Size(BTN_SQUARE_SIZE, BTN_SQUARE_SIZE));
             historyBtnImage = LoadImage(Path.Combine(imagePath, "更多.png"), new Size(BTN_SQUARE_SIZE, BTN_SQUARE_SIZE));
 
@@ -1290,33 +1568,22 @@ namespace HomeworkViewer
                 backBtnImage = new Bitmap(originalBack, new Size(targetWidth, targetHeight));
             }
 
-            leftArrowImage = LoadImage(Path.Combine(imagePath, "箭头图片.png"), new Size(31, 50));
+            leftArrowImage = LoadImage(Path.Combine(imagePath, "箭头图片.png"), new Size(50, 50));
             if (leftArrowImage != null)
             {
                 rightArrowImage = (Image)new Bitmap(leftArrowImage);
                 rightArrowImage.RotateFlip(RotateFlipType.RotateNoneFlipX);
             }
 
-            string[] iconNames = { "编辑", "返回", "记录", "轮换", "全屏", "设置", "缩小", "完成", "未交人员", "关闭", "最小化", "展开", "收起" };
-            int iconSize = (int)(BTN_SQUARE_SIZE * 0.6);
+            // 图标列表（注意：新增“导出”按钮）
+            string[] iconNames = { "编辑", "返回", "历史", "轮换", "全屏", "设置", "缩小", "完成", "未交人员", "关闭", "最小化", "展开", "收起", "导出" };
             foreach (string name in iconNames)
             {
                 string filePath = Path.Combine(imagePath, name + ".png");
                 if (File.Exists(filePath))
                 {
-                    using (Image img = Image.FromFile(filePath))
-                    {
-                        Bitmap targetBitmap = new Bitmap(iconSize, iconSize, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
-                        using (Graphics g = Graphics.FromImage(targetBitmap))
-                        {
-                            g.InterpolationMode = InterpolationMode.HighQualityBicubic;
-                            g.SmoothingMode = SmoothingMode.HighQuality;
-                            g.PixelOffsetMode = PixelOffsetMode.HighQuality;
-                            g.CompositingQuality = CompositingQuality.HighQuality;
-                            g.DrawImage(img, 0, 0, iconSize, iconSize);
-                        }
-                        buttonIcons[name] = targetBitmap;
-                    }
+                    // 直接加载原始图片，不再缩放
+                    buttonIcons[name] = Image.FromFile(filePath);
                 }
             }
         }
@@ -1396,9 +1663,10 @@ namespace HomeworkViewer
         // ---------- 绘制 ----------
         protected override void OnPaint(PaintEventArgs e)
         {
-            base.OnPaint(e);
+             base.OnPaint(e);
             Graphics g = e.Graphics;
             g.SmoothingMode = SmoothingMode.AntiAlias;
+            g.InterpolationMode = InterpolationMode.HighQualityBicubic;  // 新增
 
             g.TranslateTransform(offset.X, offset.Y);
             g.ScaleTransform(scaleFactor, scaleFactor);
@@ -1440,6 +1708,20 @@ namespace HomeworkViewer
             else
                 DrawGrid(g);
             DrawButtons(g, barRect);
+
+            // 编辑模式下显示提示
+            if (editMode && !rotationMode && !unsubmittedMode && appConfig.EnableMarkdown)
+            {
+                using (Font hintFont = new Font("微软雅黑", 9, FontStyle.Italic))
+                using (Brush hintBrush = new SolidBrush(Color.FromArgb(180, Color.Gray)))
+                {
+                    string hintText = "提示：按 Ctrl + I 可插入数学公式";
+                    SizeF size = g.MeasureString(hintText, hintFont);
+                    float x = (VIRTUAL_SIZE.Width - size.Width) / 2;
+                    float y = VIRTUAL_SIZE.Height - 25;
+                    g.DrawString(hintText, hintFont, hintBrush, x, y);
+                }
+            }
 
             g.ResetTransform();
         }
@@ -1486,30 +1768,33 @@ namespace HomeworkViewer
                 DrawTransparentButton(g, backBtnRect, "返回", buttonIcons.ContainsKey("返回") ? buttonIcons["返回"] : null, ref backBtnRect, backBtnRect.Location, _backPressed);
 
                 int btnY = barRect.Top + (barRect.Height - BTN_SQUARE_SIZE) / 2;
-                int totalButtonsWidth = 3 * BTN_SQUARE_SIZE + 2 * 10;
+                int totalButtonsWidth = 4 * BTN_SQUARE_SIZE + 3 * 10; // 增加导出按钮
                 int startX = barRect.Right - totalButtonsWidth - 20;
 
                 Point editPos = new Point(startX, btnY);
                 Point historyPos = new Point(editPos.X + BTN_SQUARE_SIZE + 10, btnY);
                 Point fullscreenPos = new Point(historyPos.X + BTN_SQUARE_SIZE + 10, btnY);
+                Point exportPos = new Point(fullscreenPos.X + BTN_SQUARE_SIZE + 10, btnY);
 
                 string editButtonText = unsubmittedMode ? (editMode ? "完成" : "登记") : (editMode ? "完成" : "编辑");
                 string editIconKey = editMode ? "完成" : (unsubmittedMode ? "编辑" : "编辑");
                 DrawTransparentButton(g, editBtnRect, editButtonText, buttonIcons.ContainsKey(editIconKey) ? buttonIcons[editIconKey] : null, ref editBtnRect, editPos, _editPressed);
 
-                string historyIconKey = historyMode ? "返回" : "记录";
-                DrawTransparentButton(g, historyBtnRect, historyMode ? "返回" : "记录", buttonIcons.ContainsKey(historyIconKey) ? buttonIcons[historyIconKey] : null, ref historyBtnRect, historyPos, _historyPressed);
+                string historyIconKey = historyMode ? "返回" : "历史";
+                DrawTransparentButton(g, historyBtnRect, historyMode ? "返回" : "历史", buttonIcons.ContainsKey(historyIconKey) ? buttonIcons[historyIconKey] : null, ref historyBtnRect, historyPos, _historyPressed);
 
                 string fullscreenIconKey = fullscreen ? "缩小" : "全屏";
                 DrawTransparentButton(g, fullscreenBtnRect, fullscreen ? "缩小" : "全屏", buttonIcons.ContainsKey(fullscreenIconKey) ? buttonIcons[fullscreenIconKey] : null, ref fullscreenBtnRect, fullscreenPos, _fullscreenPressed);
+
+                DrawTransparentButton(g, exportBtnRect, "导出", buttonIcons.ContainsKey("导出") ? buttonIcons["导出"] : null, ref exportBtnRect, exportPos, _exportPressed);
 
                 if (unsubmittedMode)
                 {
                     int totalPages = (currentSubjects.Length + UNSUBMITTED_ROWS_PER_PAGE - 1) / UNSUBMITTED_ROWS_PER_PAGE;
                     if (totalPages > 1)
                     {
-                        leftArrowRect = new Rectangle(50, VIRTUAL_SIZE.Height / 2 - 25, 31, 50);
-                        rightArrowRect = new Rectangle(VIRTUAL_SIZE.Width - 50 - 31, VIRTUAL_SIZE.Height / 2 - 25, 31, 50);
+                        leftArrowRect = new Rectangle(50, VIRTUAL_SIZE.Height / 2 - 25, 50, 50);
+                        rightArrowRect = new Rectangle(VIRTUAL_SIZE.Width - 50 - 50, VIRTUAL_SIZE.Height / 2 - 25, 50, 50);
                         if (leftArrowImage != null)
                             g.DrawImage(leftArrowImage, leftArrowRect);
                         else
@@ -1536,8 +1821,8 @@ namespace HomeworkViewer
                 }
                 else if (rotationMode)
                 {
-                    leftArrowRect = new Rectangle(50, VIRTUAL_SIZE.Height / 2 - 25, 31, 50);
-                    rightArrowRect = new Rectangle(VIRTUAL_SIZE.Width - 50 - 31, VIRTUAL_SIZE.Height / 2 - 25, 31, 50);
+                    leftArrowRect = new Rectangle(50, VIRTUAL_SIZE.Height / 2 - 25, 50, 50);
+                    rightArrowRect = new Rectangle(VIRTUAL_SIZE.Width - 50 - 50, VIRTUAL_SIZE.Height / 2 - 25, 50, 50);
                     if (leftArrowImage != null)
                         g.DrawImage(leftArrowImage, leftArrowRect);
                     else
@@ -1588,14 +1873,15 @@ namespace HomeworkViewer
                 {
                     if (isWin10)
                     {
-                        int totalButtonsWidth = 8 * BTN_SQUARE_SIZE + 7 * 10;
+                        int totalButtonsWidth = 9 * BTN_SQUARE_SIZE + 8 * 10;
                         int startX = barRect.Right - totalButtonsWidth - 20;
 
                         Point collapsePos = new Point(startX, btnY);
                         Point settingsPos = new Point(collapsePos.X + BTN_SQUARE_SIZE + 10, btnY);
                         Point rotatePos = new Point(settingsPos.X + BTN_SQUARE_SIZE + 10, btnY);
                         Point unsubmittedPos = new Point(rotatePos.X + BTN_SQUARE_SIZE + 10, btnY);
-                        Point editPos = new Point(unsubmittedPos.X + BTN_SQUARE_SIZE + 10, btnY);
+                        Point exportPos = new Point(unsubmittedPos.X + BTN_SQUARE_SIZE + 10, btnY);
+                        Point editPos = new Point(exportPos.X + BTN_SQUARE_SIZE + 10, btnY);
                         Point historyPos = new Point(editPos.X + BTN_SQUARE_SIZE + 10, btnY);
                         Point minimizePos = new Point(historyPos.X + BTN_SQUARE_SIZE + 10, btnY);
                         Point closePos = new Point(minimizePos.X + BTN_SQUARE_SIZE + 10, btnY);
@@ -1604,21 +1890,23 @@ namespace HomeworkViewer
                         DrawTransparentButton(g, settingsBtnRect, "设置", buttonIcons.ContainsKey("设置") ? buttonIcons["设置"] : null, ref settingsBtnRect, settingsPos, _settingsPressed);
                         DrawTransparentButton(g, rotateBtnRect, "轮换", buttonIcons.ContainsKey("轮换") ? buttonIcons["轮换"] : null, ref rotateBtnRect, rotatePos, _rotatePressed);
                         DrawTransparentButton(g, unsubmittedBtnRect, "未交", buttonIcons.ContainsKey("未交人员") ? buttonIcons["未交人员"] : null, ref unsubmittedBtnRect, unsubmittedPos, _unsubmittedPressed);
+                        DrawTransparentButton(g, exportBtnRect, "导出", buttonIcons.ContainsKey("导出") ? buttonIcons["导出"] : null, ref exportBtnRect, exportPos, _exportPressed);
                         DrawTransparentButton(g, editBtnRect, editMode ? "完成" : "编辑", buttonIcons.ContainsKey(editMode ? "完成" : "编辑") ? buttonIcons[editMode ? "完成" : "编辑"] : null, ref editBtnRect, editPos, _editPressed);
-                        DrawTransparentButton(g, historyBtnRect, historyMode ? "返回" : "记录", buttonIcons.ContainsKey(historyMode ? "返回" : "记录") ? buttonIcons[historyMode ? "返回" : "记录"] : null, ref historyBtnRect, historyPos, _historyPressed);
+                        DrawTransparentButton(g, historyBtnRect, historyMode ? "返回" : "历史", buttonIcons.ContainsKey(historyMode ? "返回" : "历史") ? buttonIcons[historyMode ? "返回" : "历史"] : null, ref historyBtnRect, historyPos, _historyPressed);
                         DrawTransparentButton(g, minimizeBtnRect, "最小化", buttonIcons.ContainsKey("最小化") ? buttonIcons["最小化"] : null, ref minimizeBtnRect, minimizePos, _minimizePressed);
                         DrawTransparentButton(g, closeBtnRect, "关闭", buttonIcons.ContainsKey("关闭") ? buttonIcons["关闭"] : null, ref closeBtnRect, closePos, _closePressed);
                     }
                     else
                     {
-                        int totalButtonsWidth = 9 * BTN_SQUARE_SIZE + 8 * 10;
+                        int totalButtonsWidth = 10 * BTN_SQUARE_SIZE + 9 * 10;
                         int startX = barRect.Right - totalButtonsWidth - 20;
 
                         Point collapsePos = new Point(startX, btnY);
                         Point settingsPos = new Point(collapsePos.X + BTN_SQUARE_SIZE + 10, btnY);
                         Point rotatePos = new Point(settingsPos.X + BTN_SQUARE_SIZE + 10, btnY);
                         Point unsubmittedPos = new Point(rotatePos.X + BTN_SQUARE_SIZE + 10, btnY);
-                        Point editPos = new Point(unsubmittedPos.X + BTN_SQUARE_SIZE + 10, btnY);
+                        Point exportPos = new Point(unsubmittedPos.X + BTN_SQUARE_SIZE + 10, btnY);
+                        Point editPos = new Point(exportPos.X + BTN_SQUARE_SIZE + 10, btnY);
                         Point historyPos = new Point(editPos.X + BTN_SQUARE_SIZE + 10, btnY);
                         Point fullscreenPos = new Point(historyPos.X + BTN_SQUARE_SIZE + 10, btnY);
                         Point minimizePos = new Point(fullscreenPos.X + BTN_SQUARE_SIZE + 10, btnY);
@@ -1628,8 +1916,9 @@ namespace HomeworkViewer
                         DrawTransparentButton(g, settingsBtnRect, "设置", buttonIcons.ContainsKey("设置") ? buttonIcons["设置"] : null, ref settingsBtnRect, settingsPos, _settingsPressed);
                         DrawTransparentButton(g, rotateBtnRect, "轮换", buttonIcons.ContainsKey("轮换") ? buttonIcons["轮换"] : null, ref rotateBtnRect, rotatePos, _rotatePressed);
                         DrawTransparentButton(g, unsubmittedBtnRect, "未交", buttonIcons.ContainsKey("未交人员") ? buttonIcons["未交人员"] : null, ref unsubmittedBtnRect, unsubmittedPos, _unsubmittedPressed);
+                        DrawTransparentButton(g, exportBtnRect, "导出", buttonIcons.ContainsKey("导出") ? buttonIcons["导出"] : null, ref exportBtnRect, exportPos, _exportPressed);
                         DrawTransparentButton(g, editBtnRect, editMode ? "完成" : "编辑", buttonIcons.ContainsKey(editMode ? "完成" : "编辑") ? buttonIcons[editMode ? "完成" : "编辑"] : null, ref editBtnRect, editPos, _editPressed);
-                        DrawTransparentButton(g, historyBtnRect, historyMode ? "返回" : "记录", buttonIcons.ContainsKey(historyMode ? "返回" : "记录") ? buttonIcons[historyMode ? "返回" : "记录"] : null, ref historyBtnRect, historyPos, _historyPressed);
+                        DrawTransparentButton(g, historyBtnRect, historyMode ? "返回" : "历史", buttonIcons.ContainsKey(historyMode ? "返回" : "历史") ? buttonIcons[historyMode ? "返回" : "历史"] : null, ref historyBtnRect, historyPos, _historyPressed);
                         DrawTransparentButton(g, fullscreenBtnRect, fullscreen ? "缩小" : "全屏", buttonIcons.ContainsKey(fullscreen ? "缩小" : "全屏") ? buttonIcons[fullscreen ? "缩小" : "全屏"] : null, ref fullscreenBtnRect, fullscreenPos, _fullscreenPressed);
                         DrawTransparentButton(g, minimizeBtnRect, "最小化", buttonIcons.ContainsKey("最小化") ? buttonIcons["最小化"] : null, ref minimizeBtnRect, minimizePos, _minimizePressed);
                         DrawTransparentButton(g, closeBtnRect, "关闭", buttonIcons.ContainsKey("关闭") ? buttonIcons["关闭"] : null, ref closeBtnRect, closePos, _closePressed);
@@ -1647,9 +1936,18 @@ namespace HomeworkViewer
 
             if (icon != null)
             {
-                int iconX = targetRect.Left + (targetRect.Width - icon.Width) / 2;
-                int iconY = targetRect.Top + iconTopMargin;
-                g.DrawImage(icon, iconX, iconY, icon.Width, icon.Height);
+                // 图标高度占按钮高度的 50%
+                int targetHeight = (int)(targetRect.Height * 0.5);
+                int targetWidth = (int)((float)icon.Width / icon.Height * targetHeight);
+                
+                // 水平居中
+                int iconX = targetRect.Left + (targetRect.Width - targetWidth) / 2;
+                // 垂直方向：原本垂直居中后再向上移动 5 像素（可调整）
+                int iconY = targetRect.Top + (targetRect.Height - targetHeight) / 2 - 7;
+                
+                // 设置高质量插值模式
+                g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                g.DrawImage(icon, iconX, iconY, targetWidth, targetHeight);
             }
 
             using (Font smallFont = new Font("微软雅黑", 8))
@@ -2678,8 +2976,9 @@ namespace HomeworkViewer
             var version = Environment.OSVersion.Version;
             if (version.Major == 10 && version.Minor == 0 && version.Build < 22000)
             {
-                this.WindowState = FormWindowState.Maximized;
+                // 修复 Win10 全屏问题：先设置无边框再最大化
                 this.FormBorderStyle = FormBorderStyle.None;
+                this.WindowState = FormWindowState.Maximized;
                 fullscreen = true;
                 UpdateScale();
             }

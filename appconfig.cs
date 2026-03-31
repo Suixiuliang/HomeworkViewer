@@ -32,11 +32,19 @@ namespace HomeworkViewer
 
         public int UpdatePending { get; set; } = 0;
 
-        // 是否启用 Markdown 渲染
+        // Markdown 渲染开关
         public bool EnableMarkdown { get; set; } = false;
 
-        // 是否启用颜色功能
-        public bool EnableColor { get; set; } = false;
+        // 字体设置
+        public string FontFamily { get; set; } = "微软雅黑";
+        public bool IsCustomFont { get; set; } = false;
+
+        // 卡片尺寸调整（0 表示自动）
+        public int RowHeight { get; set; } = 0;
+        public int ColumnWidth { get; set; } = 0;
+
+        // 导出默认格式
+        public string ExportFormat { get; set; } = "txt";
 
         private static string GetConfigPath()
         {
