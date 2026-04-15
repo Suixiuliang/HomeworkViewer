@@ -32,19 +32,32 @@ namespace HomeworkViewer
 
         public int UpdatePending { get; set; } = 0;
 
-        // Markdown 渲染开关
-        public bool EnableMarkdown { get; set; } = false;
+        public bool EnableMarkdown { get; set; } = false;      // 已废弃，但保留兼容性
 
-        // 字体设置
+        public bool ShowDueTime { get; set; } = true;
+        public bool ShowMouseGlow { get; set; } = true;
+
+        // 背景图片相关
+        public bool UseBackgroundImage { get; set; } = false;
+        public string BackgroundImagePath { get; set; } = "";
+
+        // 字体相关
         public string FontFamily { get; set; } = "微软雅黑";
         public bool IsCustomFont { get; set; } = false;
 
-        // 卡片尺寸调整（0 表示自动）
         public int RowHeight { get; set; } = 0;
         public int ColumnWidth { get; set; } = 0;
 
-        // 导出默认格式
         public string ExportFormat { get; set; } = "txt";
+
+        public bool MgmtEnabled { get; set; } = false;
+        public string MgmtManifestUrl { get; set; } = "";
+        public Dictionary<string, int> MgmtVersions { get; set; } = new();
+        public bool MgmtForceRemote { get; set; } = false;
+        public string OrganizationName { get; set; } = "";
+
+        // 新增：是否使用 WebView2 渲染 Markdown 和 LaTeX
+        public bool UseWebView2 { get; set; } = false;
 
         private static string GetConfigPath()
         {

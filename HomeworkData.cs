@@ -1,3 +1,5 @@
+// Copyright (c) 2026 MaxSui 隋修梁. All rights reserved.
+// Licensed under the GPL3.0 License. See LICENSE in the project root for license information.
 #nullable disable
 using System;
 using System.Collections.Generic;
@@ -9,10 +11,7 @@ namespace HomeworkViewer
     public class HomeworkData
     {
         public Dictionary<string, string> Subjects { get; set; } = new Dictionary<string, string>();
-        public Dictionary<string, string> ClassReps { get; set; } = new Dictionary<string, string>();
-        public Dictionary<string, string> Teachers { get; set; } = new Dictionary<string, string>();
         public Dictionary<string, string> DueTimes { get; set; } = new Dictionary<string, string>();
-        public Dictionary<string, string> Unsubmitted { get; set; } = new Dictionary<string, string>();
 
         public static readonly string[] SubjectNames = { "语文", "数学", "英语", "物理", "化学", "生物", "政治", "历史", "地理" };
 

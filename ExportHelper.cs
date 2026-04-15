@@ -1,3 +1,5 @@
+// Copyright (c) 2026 MaxSui 隋修梁. All rights reserved.
+// Licensed under the GPL3.0 License. See LICENSE in the project root for license information.
 using System;
 using System.Collections.Generic;
 using System.Drawing;
@@ -21,7 +23,6 @@ namespace HomeworkViewer
         .subject { margin-bottom: 20px; border-left: 4px solid #ffcc00; padding-left: 15px; }
         .subject-name { font-size: 18px; font-weight: bold; color: #333; }
         .content { margin-top: 8px; white-space: pre-wrap; }
-        .unsubmitted { color: red; margin-top: 5px; font-style: italic; }
     </style>
 </head>
 <body>
@@ -33,30 +34,30 @@ namespace HomeworkViewer
         public static void ExportToTxt(HomeworkData data, DateTime date, string filePath, bool includeUnsubmitted)
         {
             var sb = new StringBuilder();
-            string dateLine = $"=== {date:yyyy年MM月dd日} ===";
+            string separator = new string('—', 60);
+            string dateLine = $"         {date:yyyy年MM月dd日}         ";
+            string titleLine = "          作业          ";
+
+            sb.AppendLine(separator);
             sb.AppendLine(dateLine);
+            sb.AppendLine(titleLine);
+            sb.AppendLine(separator);
 
             foreach (var subject in HomeworkData.SubjectNames)
             {
                 if (!data.Subjects.ContainsKey(subject)) continue;
                 string content = data.Subjects[subject] ?? "";
-                string unsubmitted = includeUnsubmitted && data.Unsubmitted.ContainsKey(subject) ? data.Unsubmitted[subject] : null;
                 sb.AppendLine();
                 sb.AppendLine($"【{subject}】");
-                if (!string.IsNullOrWhiteSpace(content))
+                string[] lines = content.Split('\n');
+                foreach (var line in lines)
                 {
-                    string[] lines = content.Split('\n');
-                    foreach (var line in lines)
-                    {
-                        string trimmed = line.TrimEnd();
-                        if (!string.IsNullOrEmpty(trimmed))
-                            sb.AppendLine(trimmed);
-                    }
+                    string trimmed = line.TrimEnd();
+                    if (!string.IsNullOrEmpty(trimmed))
+                        sb.AppendLine(trimmed);
                 }
-                if (!string.IsNullOrEmpty(unsubmitted))
-                {
-                    sb.AppendLine($"未交：{unsubmitted}");
-                }
+                sb.AppendLine();
+                sb.AppendLine(separator);
             }
             File.WriteAllText(filePath, sb.ToString(), Encoding.UTF8);
         }
@@ -83,12 +84,10 @@ namespace HomeworkViewer
             {
                 if (!data.Subjects.ContainsKey(subject)) continue;
                 string content = data.Subjects[subject] ?? "";
-                string unsubmitted = includeUnsubmitted && data.Unsubmitted.ContainsKey(subject) ? $"<div class='unsubmitted'>未交：{data.Unsubmitted[subject]}</div>" : "";
                 subjectsHtml.Append($@"
                 <div class='subject'>
                     <div class='subject-name'>{subject}</div>
                     <div class='content'>{content.Replace("\n", "<br/>")}</div>
-                    {unsubmitted}
                 </div>");
             }
             string html = TemplateHtml.Replace("{date}", date.ToString("yyyy年MM月dd日"))
