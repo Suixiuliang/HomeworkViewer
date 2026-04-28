@@ -1,5 +1,3 @@
-// Copyright (c) 2026 MaxSui 隋修梁. All rights reserved.
-// Licensed under the GPL3.0 License. See LICENSE in the project root for license information.
 #nullable disable
 using System;
 using System.Diagnostics;
@@ -22,7 +20,6 @@ namespace HomeworkViewer
             mutex = new Mutex(true, appName, out createdNew);
             if (!createdNew)
             {
-                // 已有实例在运行，激活它并退出当前实例
                 ActivateExistingInstance();
                 return;
             }
@@ -34,9 +31,6 @@ namespace HomeworkViewer
             mutex.ReleaseMutex();
         }
 
-        /// <summary>
-        /// 查找并激活已经运行的实例
-        /// </summary>
         private static void ActivateExistingInstance()
         {
             Process currentProcess = Process.GetCurrentProcess();

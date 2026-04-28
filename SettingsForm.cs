@@ -25,26 +25,6 @@ namespace HomeworkViewer
 
     public partial class SettingsForm : Form
     {
-        // 自定义控件：绘制 1 像素高的细线，支持透明背景
-        private class LineControl : Control
-        {
-            public LineControl()
-            {
-                SetStyle(ControlStyles.SupportsTransparentBackColor, true);
-                SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.ResizeRedraw, true);
-                Height = 1;
-                BackColor = Color.Transparent;
-            }
-            protected override void OnPaint(PaintEventArgs e)
-            {
-                base.OnPaint(e);
-                using (var pen = new Pen(Color.FromArgb(100, 100, 100), 1))
-                {
-                    e.Graphics.DrawLine(pen, 0, 0, Width, 0);
-                }
-            }
-        }
-
         private Button btnBasic;
         private Button btnAppearance;
         private Button btnTimeSlot;
@@ -65,16 +45,14 @@ namespace HomeworkViewer
         private List<Button> _sidebarButtons = new List<Button>();
 
         // 基本设置
-        private ComboBox cmbMode;
-        private ComboBox cmbFontSize;
         private NumericUpDown numScrollSpeed;
+        private NumericUpDown numAutoPageInterval;
         private ComboBox cmbDefaultExportFormat;
+        private ComboBox cmbFontSize;
 
         // 外观
         private TrackBar trackCardOpacity;
         private NumericUpDown numCardOpacity;
-        private TrackBar trackBgOpacity;
-        private NumericUpDown numBgOpacity;
         private RadioButton rbBlack;
         private RadioButton rbWhite;
         private Button btnBarColor;
@@ -116,7 +94,6 @@ namespace HomeworkViewer
         private ProgressBar progressDownload;
         private Label lblDownloadStatus;
         private Button btnResetAll;
-        private CheckBox chkUseWebView2;    // 新增：是否启用 WebView2 渲染
 
         private Button btnOK;
         private Button btnCancel;
@@ -315,7 +292,7 @@ namespace HomeworkViewer
                         }));
                     }
                 }
-                catch (HttpRequestException) when (url != originalUrl)
+                catch (HttpRequestException _) when (url != originalUrl)
                 {
                     try
                     {
@@ -732,7 +709,7 @@ namespace HomeworkViewer
             sidebar.Controls.Add(btnAppearance);
             sidebar.Controls.Add(btnBasic);
 
-            contentPanel = new Panel { Dock = DockStyle.Fill, BackColor = Color.FromArgb(45, 45, 48), Padding = new Padding(20, 20, 20, 20), AutoScroll = true };
+            contentPanel = new Panel { Dock = DockStyle.Fill, BackColor = Color.FromArgb(45, 45, 48), Padding = new Padding(20, 40, 20, 20), AutoScroll = true };
 
             Panel buttonPanel = new Panel { Height = 50, Dock = DockStyle.Bottom, BackColor = Color.FromArgb(30, 30, 30) };
             btnOK = new Button { Text = "确定", Location = new Point(200, 10), Size = new Size(80, 30), BackColor = Color.FromArgb(64, 64, 64), ForeColor = Color.White, FlatStyle = FlatStyle.Flat };
@@ -802,326 +779,38 @@ namespace HomeworkViewer
             }
         }
 
-        // ---------- 基本设置 ----------
-        private Panel basicPanel;
-        private void CreateBasicPage()
-        {
-            basicPanel = new Panel { Dock = DockStyle.Fill, BackColor = Color.Transparent, AutoSize = true };
-            TableLayoutPanel layout = new TableLayoutPanel
-            {
-                Dock = DockStyle.Top,
-                ColumnCount = 2,
-                RowCount = 4,
-                Padding = new Padding(0),
-                AutoSize = true,
-                BackColor = Color.Transparent
-            };
-            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 120));
-            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-            for (int i = 0; i < 4; i++)
-                layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-
-            AddLabelAndControl(layout, "展示模式:", cmbMode = CreateComboBox(150, new[] { "大理", "中理", "小理", "大文", "全科" }), 0);
-            AddLabelAndControl(layout, "字号大小:", cmbFontSize = CreateComboBox(100, new[] { "小", "中", "大" }), 1);
-            AddLabelAndControl(layout, "滚动速度(px/s):", numScrollSpeed = new NumericUpDown { Minimum = 0, Maximum = 200, Value = config.ScrollSpeed, Width = 80, BackColor = Color.FromArgb(64, 64, 64), ForeColor = Color.White }, 2);
-            AddLabelAndControl(layout, "默认导出格式:", cmbDefaultExportFormat = CreateComboBox(150, new[] { "txt", "pdf", "jpg", "html" }), 3);
-            cmbDefaultExportFormat.SelectedItem = config.ExportFormat;
-
-            basicPanel.Controls.Add(layout);
-        }
-        private void ShowBasicPage() => contentPanel.Controls.Add(basicPanel);
-
-        // ---------- 外观设置 ----------
-        private Panel appearancePanel;
-        private void CreateAppearancePage()
-        {
-            appearancePanel = new Panel { Dock = DockStyle.Fill, BackColor = Color.Transparent, AutoSize = true };
-            TableLayoutPanel layout = new TableLayoutPanel
-            {
-                Dock = DockStyle.Top,
-                ColumnCount = 2,
-                RowCount = 1,
-                Padding = new Padding(0),
-                AutoSize = true,
-                BackColor = Color.Transparent
-            };
-            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 120));
-            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-
-            int row = 0;
-
-            // 卡片样式
-            AddSectionTitle(layout, "卡片样式", ref row);
-            trackCardOpacity = new TrackBar { Minimum = 0, Maximum = 100, TickFrequency = 10, Width = 150, BackColor = Color.FromArgb(45, 45, 48) };
-            numCardOpacity = new NumericUpDown { Minimum = 0, Maximum = 100, Width = 60, BackColor = Color.FromArgb(64, 64, 64), ForeColor = Color.White };
-            trackCardOpacity.ValueChanged += (s, e) => numCardOpacity.Value = trackCardOpacity.Value;
-            numCardOpacity.ValueChanged += (s, e) => trackCardOpacity.Value = (int)numCardOpacity.Value;
-            Panel cardPanel = new FlowLayoutPanel { FlowDirection = FlowDirection.LeftToRight, AutoSize = true, BackColor = Color.Transparent };
-            cardPanel.Controls.Add(trackCardOpacity);
-            cardPanel.Controls.Add(numCardOpacity);
-            AddLabelAndControl(layout, "卡片透明度:", cardPanel, row++);
-            AddLabelAndControl(layout, "背景透明度:", CreateBgOpacityControl(), row++);
-            AddLabelAndControl(layout, "顶部条颜色:", CreateColorPicker(), row++);
-            AddSeparator(layout, ref row);
-
-            // 字体设置
-            AddSectionTitle(layout, "字体设置", ref row);
-            AddLabelAndControl(layout, "字体颜色:", CreateFontColorRadio(), row++);
-            AddLabelAndControl(layout, "字体:", CreateFontFamilySelector(), row++);
-            AddSeparator(layout, ref row);
-
-            // 视觉效果
-            AddSectionTitle(layout, "视觉效果", ref row);
-            AddLabelAndControl(layout, "背景效果:", cmbBgEffect = CreateComboBox(150, new[] { "Mica", "Acrylic", "Aero" }), row++);
-            cmbBgEffect.SelectedItem = config.BackgroundEffect;
-            AddLabelAndControl(layout, "鼠标光晕:", chkShowMouseGlow = new CheckBox { Text = "显示鼠标跟随光晕", Checked = config.ShowMouseGlow, AutoSize = true, ForeColor = Color.White, BackColor = Color.Transparent }, row++);
-            AddSeparator(layout, ref row);
-
-            // 背景图片
-            AddSectionTitle(layout, "背景图片", ref row);
-            AddLabelAndControl(layout, "背景类型:", CreateBgTypeRadio(), row++);
-            AddLabelAndControl(layout, "图片路径:", CreateImagePathSelector(), row++);
-
-            appearancePanel.Controls.Add(layout);
-        }
-
-        private Control CreateBgOpacityControl()
-        {
-            trackBgOpacity = new TrackBar { Minimum = 0, Maximum = 100, TickFrequency = 10, Width = 150, BackColor = Color.FromArgb(45, 45, 48) };
-            numBgOpacity = new NumericUpDown { Minimum = 0, Maximum = 100, Width = 60, BackColor = Color.FromArgb(64, 64, 64), ForeColor = Color.White };
-            trackBgOpacity.ValueChanged += (s, e) => numBgOpacity.Value = trackBgOpacity.Value;
-            numBgOpacity.ValueChanged += (s, e) => trackBgOpacity.Value = (int)numBgOpacity.Value;
-            FlowLayoutPanel panel = new FlowLayoutPanel { FlowDirection = FlowDirection.LeftToRight, AutoSize = true, BackColor = Color.Transparent };
-            panel.Controls.Add(trackBgOpacity);
-            panel.Controls.Add(numBgOpacity);
-            return panel;
-        }
-
-        private void ShowAppearancePage() => contentPanel.Controls.Add(appearancePanel);
-
-        // ---------- 时间段设置 ----------
-        private Panel timeSlotPanel;
-        private void CreateTimeSlotPage()
-        {
-            timeSlotPanel = new Panel { Dock = DockStyle.Fill, BackColor = Color.Transparent, AutoScroll = true };
-            TableLayoutPanel layout = new TableLayoutPanel
-            {
-                Dock = DockStyle.Top,
-                ColumnCount = 1,
-                RowCount = 1,
-                Padding = new Padding(0),
-                AutoSize = true,
-                BackColor = Color.Transparent
-            };
-            int row = 0;
-
-            AddSectionTitle(layout, "通用设置", ref row, true);
-            layout.Controls.Add(chkShowDueTime = new CheckBox
-            {
-                Text = "显示提交时间（不勾选则隐藏所有界面的提交时间和提醒）",
-                Checked = config.ShowDueTime,
-                AutoSize = true,
-                ForeColor = Color.White,
-                BackColor = Color.Transparent,
-                Margin = new Padding(0, 5, 0, 10)
-            }, 0, row++);
-
-            AddSectionTitle(layout, "晚修节数", ref row, true);
-            TableLayoutPanel countLayout = new TableLayoutPanel { ColumnCount = 2, RowCount = 1, AutoSize = true, BackColor = Color.Transparent };
-            countLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 120));
-            countLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-            countLayout.Controls.Add(new Label { Text = "节数:", TextAlign = ContentAlignment.MiddleRight, ForeColor = Color.White, AutoSize = true }, 0, 0);
-            numEveningCount = new NumericUpDown { Minimum = 1, Maximum = 6, Value = config.EveningClassCount, Width = 80, BackColor = Color.FromArgb(64, 64, 64), ForeColor = Color.White };
-            numEveningCount.ValueChanged += NumEveningCount_ValueChanged;
-            countLayout.Controls.Add(numEveningCount, 1, 0);
-            layout.Controls.Add(countLayout, 0, row++);
-
-            AddSectionTitle(layout, "各节时间段", ref row, true);
-            eveningPanel = new FlowLayoutPanel
-            {
-                FlowDirection = FlowDirection.TopDown,
-                WrapContents = false,
-                AutoSize = true,
-                BackColor = Color.Transparent,
-                Margin = new Padding(0, 5, 0, 10)
-            };
-            layout.Controls.Add(eveningPanel, 0, row++);
-
-            FlowLayoutPanel buttonPanel = new FlowLayoutPanel { FlowDirection = FlowDirection.LeftToRight, AutoSize = true, BackColor = Color.Transparent, Margin = new Padding(0, 10, 0, 0) };
-            btnTestFlash = new Button { Text = "测试闪烁", Width = 100, Height = 30, BackColor = Color.FromArgb(64, 64, 64), ForeColor = Color.White, FlatStyle = FlatStyle.Flat, Visible = false };
-            btnTestFlash.Click += BtnTestFlash_Click;
-            btnStopFlash = new Button { Text = "停止闪烁", Width = 100, Height = 30, BackColor = Color.FromArgb(64, 64, 64), ForeColor = Color.White, FlatStyle = FlatStyle.Flat, Margin = new Padding(10, 0, 0, 0), Visible = false };
-            btnStopFlash.Click += BtnStopFlash_Click;
-            buttonPanel.Controls.Add(btnTestFlash);
-            buttonPanel.Controls.Add(btnStopFlash);
-            layout.Controls.Add(buttonPanel, 0, row++);
-
-            timeSlotPanel.Controls.Add(layout);
-            UpdateEveningEditors();
-        }
-        private void ShowTimeSlotPage() => contentPanel.Controls.Add(timeSlotPanel);
-
-        // ---------- 集控管理页面 ----------
-        private Panel mgmtPanel;
-        private void CreateMgmtPage()
-        {
-            mgmtPanel = new Panel { Dock = DockStyle.Fill, BackColor = Color.Transparent, AutoSize = true };
-            TableLayoutPanel layout = new TableLayoutPanel
-            {
-                Dock = DockStyle.Top,
-                ColumnCount = 2,
-                RowCount = 1,
-                Padding = new Padding(0),
-                AutoSize = true,
-                BackColor = Color.Transparent
-            };
-            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 120));
-            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-
-            int row = 0;
-            AddLabelAndControl(layout, "启用集控:", chkMgmtEnabled = new CheckBox { Text = "从远程服务器同步作业数据", Checked = config.MgmtEnabled, AutoSize = true, ForeColor = Color.White, BackColor = Color.Transparent }, row++);
-            AddLabelAndControl(layout, "清单 URL:", txtMgmtManifestUrl = new TextBox { Text = config.MgmtManifestUrl, Width = 300, BackColor = Color.FromArgb(64, 64, 64), ForeColor = Color.White, BorderStyle = BorderStyle.FixedSingle }, row++);
-
-            btnTestMgmtConnection = new Button { Text = "测试连接", Width = 100, Height = 30, BackColor = Color.FromArgb(64, 64, 64), ForeColor = Color.White, FlatStyle = FlatStyle.Flat };
-            btnTestMgmtConnection.Click += BtnTestMgmtConnection_Click;
-            lblMgmtStatus = new Label { Text = "未测试", AutoSize = true, ForeColor = Color.LightGray, BackColor = Color.Transparent };
-            FlowLayoutPanel testPanel = new FlowLayoutPanel { FlowDirection = FlowDirection.LeftToRight, AutoSize = true, BackColor = Color.Transparent };
-            testPanel.Controls.Add(btnTestMgmtConnection);
-            testPanel.Controls.Add(lblMgmtStatus);
-            layout.Controls.Add(testPanel, 1, row++);
-            layout.SetRow(testPanel, row - 1);
-
-            AddLabelAndControl(layout, "组织名称:", lblMgmtOrgName = new Label { Text = config.OrganizationName, AutoSize = true, ForeColor = Color.LightGreen, BackColor = Color.Transparent, Font = new Font("微软雅黑", 9, FontStyle.Bold) }, row++);
-
-            mgmtPanel.Controls.Add(layout);
-        }
-        private void ShowMgmtPage() => contentPanel.Controls.Add(mgmtPanel);
-
-        // ---------- 关于页面 ----------
-        private Panel aboutPanel;
-        private void CreateAboutPage()
-        {
-            aboutPanel = new Panel { Dock = DockStyle.Fill, BackColor = Color.Transparent, AutoSize = true };
-            TableLayoutPanel layout = new TableLayoutPanel
-            {
-                Dock = DockStyle.Top,
-                ColumnCount = 1,
-                RowCount = 1,
-                Padding = new Padding(0),
-                AutoSize = true,
-                BackColor = Color.Transparent
-            };
-            int row = 0;
-
-            layout.Controls.Add(new Label { Text = "作业展板 版本 2.0.0", Font = new Font("微软雅黑", 12, FontStyle.Bold), AutoSize = true, ForeColor = Color.White, BackColor = Color.Transparent, Margin = new Padding(0, 0, 0, 5) }, 0, row++);
-            layout.Controls.Add(new Label { Text = "作者: MaxSui 隋修梁", AutoSize = true, ForeColor = Color.White, BackColor = Color.Transparent, Font = new Font("微软雅黑", 10), Margin = new Padding(0, 0, 0, 5) }, 0, row++);
-            layout.Controls.Add(new Label { Text = "© 2026 MaxSui 保留部分权利\n本软件遵循GNU General Public License 3.0开源协议", AutoSize = true, ForeColor = Color.White, BackColor = Color.Transparent, Margin = new Padding(0, 0, 0, 15) }, 0, row++);
-
-            AddSeparator(layout, ref row, true);
-
-            // 高级选项（包含 WebView2 开关）
-            AddSectionTitle(layout, "高级选项", ref row, true);
-            chkUseWebView2 = new CheckBox
-            {
-                Text = "启用 WebView2 渲染（Markdown + LaTeX）",
-                Checked = config.UseWebView2,
-                AutoSize = true,
-                ForeColor = Color.White,
-                BackColor = Color.Transparent,
-                Margin = new Padding(0, 5, 0, 10)
-            };
-            layout.Controls.Add(chkUseWebView2, 0, row++);
-
-            AddSeparator(layout, ref row, true);
-
-            // 镜像站
-            AddSectionTitle(layout, "镜像站", ref row, true);
-            layout.Controls.Add(lblMirrorStatus = new Label
-            {
-                Text = "正在检测镜像站...",
-                AutoSize = true,
-                ForeColor = Color.LightGreen,
-                BackColor = Color.Transparent,
-                Font = new Font("微软雅黑", 9),
-                Margin = new Padding(0, 5, 0, 5)
-            }, 0, row++);
-            layout.Controls.Add(cmbMirrorManual = new ComboBox
-            {
-                DropDownStyle = ComboBoxStyle.DropDownList,
-                Width = 200,
-                Height = 25,
-                BackColor = Color.FromArgb(64, 64, 64),
-                ForeColor = Color.White,
-                FlatStyle = FlatStyle.Flat,
-                Margin = new Padding(0, 0, 0, 10)
-            }, 0, row++);
-            cmbMirrorManual.SelectedIndexChanged += async (s, e) =>
-            {
-                if (cmbMirrorManual.SelectedItem != null && cmbMirrorManual.SelectedIndex > 0)
-                {
-                    _mirrorManager.ClearCache();
-                    await UpdateMirrorStatusAsync(lblMirrorStatus);
-                }
-            };
-
-            AddSeparator(layout, ref row, true);
-
-            // 更新
-            AddSectionTitle(layout, "更新", ref row, true);
-            layout.Controls.Add(progressDownload = new ProgressBar
-            {
-                Width = 200,
-                Height = 20,
-                Visible = false,
-                Style = ProgressBarStyle.Continuous,
-                Minimum = 0,
-                Maximum = 100,
-                Margin = new Padding(0, 5, 0, 5)
-            }, 0, row++);
-            layout.Controls.Add(lblDownloadStatus = new Label
-            {
-                Text = "",
-                AutoSize = true,
-                ForeColor = Color.White,
-                BackColor = Color.Transparent,
-                Font = new Font("微软雅黑", 9),
-                Visible = false
-            }, 0, row++);
-            FlowLayoutPanel updatePanel = new FlowLayoutPanel { FlowDirection = FlowDirection.LeftToRight, AutoSize = true, BackColor = Color.Transparent, Margin = new Padding(0, 10, 0, 10) };
-            btnCheckUpdate = new Button { Text = "检查更新", Width = 100, Height = 30, BackColor = Color.FromArgb(64, 64, 64), ForeColor = Color.White, FlatStyle = FlatStyle.Flat };
-            btnCheckUpdate.Click += btnCheckUpdate_Click;
-            btnSkipVersion = new Button { Text = "跳过", Width = 100, Height = 30, BackColor = Color.FromArgb(64, 64, 64), ForeColor = Color.White, FlatStyle = FlatStyle.Flat, Visible = false };
-            btnSkipVersion.Click += (s, e) => { btnSkipVersion.Visible = false; btnCheckUpdate.Text = "检查更新"; };
-            updatePanel.Controls.Add(btnCheckUpdate);
-            updatePanel.Controls.Add(btnSkipVersion);
-            layout.Controls.Add(updatePanel, 0, row++);
-            layout.Controls.Add(lblUpdateContent = new Label { Text = "", AutoSize = true, ForeColor = Color.White, BackColor = Color.Transparent, Font = new Font("微软雅黑", 9) }, 0, row++);
-
-            AddSeparator(layout, ref row, true);
-
-            // 重置
-            AddSectionTitle(layout, "重置", ref row, true);
-            btnResetAll = new Button
-            {
-                Text = "恢复所有设置为默认",
-                Width = 150,
-                Height = 30,
-                BackColor = Color.FromArgb(64, 64, 64),
-                ForeColor = Color.White,
-                FlatStyle = FlatStyle.Flat,
-                Margin = new Padding(0, 10, 0, 0)
-            };
-            btnResetAll.Click += BtnResetAll_Click;
-            layout.Controls.Add(btnResetAll, 0, row++);
-
-            aboutPanel.Controls.Add(layout);
-        }
-        private void ShowAboutPage() => contentPanel.Controls.Add(aboutPanel);
-
         // ---------- 辅助布局方法 ----------
-        private void AddLabelAndControl(TableLayoutPanel panel, string labelText, Control control, int row)
+        private void AddSectionHeader(TableLayoutPanel panel, string title, int row)
         {
-            Label lbl = new Label
+            Label header = new Label
+            {
+                Text = title,
+                Font = new Font("微软雅黑", 10, FontStyle.Bold),
+                ForeColor = Color.FromArgb(200, 200, 200),
+                BackColor = Color.Transparent,
+                AutoSize = true,
+                Margin = new Padding(0, 8, 0, 4)
+            };
+            panel.Controls.Add(header, 0, row);
+            panel.SetColumnSpan(header, 2);
+        }
+
+        private void AddSeparator(TableLayoutPanel panel, int row)
+        {
+            Panel line = new Panel
+            {
+                Height = 1,
+                BackColor = Color.FromArgb(80, 80, 80),
+                Dock = DockStyle.Top,
+                Margin = new Padding(0, 10, 0, 10)
+            };
+            panel.Controls.Add(line, 0, row);
+            panel.SetColumnSpan(line, 2);
+        }
+
+        private void AddSettingRow(TableLayoutPanel panel, string labelText, Control control, int row)
+        {
+            Label label = new Label
             {
                 Text = labelText,
                 TextAlign = ContentAlignment.MiddleRight,
@@ -1130,125 +819,160 @@ namespace HomeworkViewer
                 AutoSize = true,
                 Margin = new Padding(0, 5, 10, 5)
             };
-            panel.Controls.Add(lbl, 0, row);
-            control.Margin = new Padding(0, 5, 0, 5);
+            panel.Controls.Add(label, 0, row);
             panel.Controls.Add(control, 1, row);
         }
 
-        private void AddSectionTitle(TableLayoutPanel panel, string title, ref int row, bool singleColumn = false)
+        private ComboBox CreateComboBox(int width)
         {
-            TableLayoutPanel titleLayout = new TableLayoutPanel
-            {
-                ColumnCount = 2,
-                RowCount = 1,
-                Dock = DockStyle.Top,
-                AutoSize = true,
-                BackColor = Color.Transparent,
-                Margin = new Padding(0, 10, 0, 5)
-            };
-            titleLayout.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-            titleLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-
-            Label titleLabel = new Label
-            {
-                Text = title,
-                Font = new Font("微软雅黑", 10, FontStyle.Bold),
-                ForeColor = Color.FromArgb(200, 200, 200),
-                BackColor = Color.Transparent,
-                AutoSize = true,
-                Margin = new Padding(0, 0, 10, 0)
-            };
-
-            LineControl line = new LineControl
-            {
-                Dock = DockStyle.Fill,
-                Margin = new Padding(0, titleLabel.Height / 2, 0, 0)
-            };
-
-            titleLayout.Controls.Add(titleLabel, 0, 0);
-            titleLayout.Controls.Add(line, 1, 0);
-
-            if (singleColumn)
-            {
-                panel.Controls.Add(titleLayout, 0, row);
-                panel.SetColumnSpan(titleLayout, 1);
-            }
-            else
-            {
-                panel.Controls.Add(titleLayout, 0, row);
-                panel.SetColumnSpan(titleLayout, 2);
-            }
-            row++;
-        }
-
-        private void AddSeparator(TableLayoutPanel panel, ref int row, bool singleColumn = false)
-        {
-            Panel line = new Panel
-            {
-                Height = 1,
-                BackColor = Color.FromArgb(80, 80, 80),
-                Margin = new Padding(0, 5, 0, 5)
-            };
-            if (singleColumn)
-            {
-                panel.Controls.Add(line, 0, row);
-                panel.SetColumnSpan(line, 1);
-            }
-            else
-            {
-                panel.Controls.Add(line, 0, row);
-                panel.SetColumnSpan(line, 2);
-            }
-            row++;
-        }
-
-        private ComboBox CreateComboBox(int width, string[] items)
-        {
-            var combo = new ComboBox
+            return new ComboBox
             {
                 DropDownStyle = ComboBoxStyle.DropDownList,
                 Width = width,
                 BackColor = Color.FromArgb(64, 64, 64),
                 ForeColor = Color.White,
-                FlatStyle = FlatStyle.Flat
+                FlatStyle = FlatStyle.Flat,
+                AutoSize = false
             };
-            combo.Items.AddRange(items);
-            if (combo.Items.Count > 0)
-                combo.SelectedIndex = 0;
-            return combo;
         }
 
-        private Control CreateColorPicker()
+        private NumericUpDown CreateNumericUpDown(int width, decimal min, decimal max)
         {
+            return new NumericUpDown
+            {
+                Minimum = min,
+                Maximum = max,
+                Width = width,
+                BackColor = Color.FromArgb(64, 64, 64),
+                ForeColor = Color.White,
+                TextAlign = HorizontalAlignment.Right
+            };
+        }
+
+        private Panel CreateScrollablePanel()
+        {
+            Panel panel = new Panel
+            {
+                Dock = DockStyle.Fill,
+                BackColor = Color.Transparent,
+                AutoScroll = true,
+                Padding = new Padding(0)
+            };
+            return panel;
+        }
+
+        // ---------- 基本设置（使用分割线，移除科目选择） ----------
+        private Panel basicPanel;
+        private void CreateBasicPage()
+        {
+            basicPanel = CreateScrollablePanel();
+            TableLayoutPanel layout = new TableLayoutPanel
+            {
+                Dock = DockStyle.Top,
+                ColumnCount = 2,
+                RowCount = 9,
+                Padding = new Padding(20),
+                AutoSize = true,
+                BackColor = Color.Transparent
+            };
+            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 140));
+            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            for (int i = 0; i < 9; i++)
+                layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+
+            // 显示分类
+            AddSectionHeader(layout, "显示", 0);
+            AddSettingRow(layout, "字号大小:", cmbFontSize = CreateComboBox(100), 1);
+            cmbFontSize.Items.AddRange(new object[] { "小", "中", "大" });
+            cmbFontSize.SelectedIndex = config.FontSizeLevel;
+
+            AddSeparator(layout, 2);
+
+            // 滚动分类
+            AddSectionHeader(layout, "滚动", 3);
+            AddSettingRow(layout, "滚动速度(px/s):", numScrollSpeed = CreateNumericUpDown(80, 0, 200), 4);
+            AddSettingRow(layout, "自动翻页间隔(秒):", numAutoPageInterval = CreateNumericUpDown(80, 5, 300), 5);
+            numAutoPageInterval.Value = config.AutoPageInterval;
+
+            AddSeparator(layout, 6);
+
+            // 导出分类
+            AddSectionHeader(layout, "导出", 7);
+            AddSettingRow(layout, "默认导出格式:", cmbDefaultExportFormat = CreateComboBox(150), 8);
+            cmbDefaultExportFormat.Items.AddRange(new object[] { "txt", "pdf", "jpg", "html" });
+            cmbDefaultExportFormat.SelectedItem = config.ExportFormat;
+
+            basicPanel.Controls.Add(layout);
+        }
+        private void ShowBasicPage() => contentPanel.Controls.Add(basicPanel);
+
+        // ---------- 外观设置（使用分割线，添加滚动条） ----------
+        private Panel appearancePanel;
+        private void CreateAppearancePage()
+        {
+            appearancePanel = CreateScrollablePanel();
+            TableLayoutPanel layout = new TableLayoutPanel
+            {
+                Dock = DockStyle.Top,
+                ColumnCount = 2,
+                RowCount = 21,
+                Padding = new Padding(20),
+                AutoSize = true,
+                BackColor = Color.Transparent
+            };
+            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 140));
+            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            for (int i = 0; i < 21; i++)
+                layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+
+            // 卡片样式
+            AddSectionHeader(layout, "卡片样式", 0);
+            FlowLayoutPanel cardPanel = new FlowLayoutPanel { FlowDirection = FlowDirection.LeftToRight, AutoSize = true, BackColor = Color.Transparent };
+            trackCardOpacity = new TrackBar { Minimum = 0, Maximum = 100, TickFrequency = 10, Width = 150, BackColor = Color.FromArgb(45, 45, 48) };
+            numCardOpacity = new NumericUpDown { Minimum = 0, Maximum = 100, Width = 50, BackColor = Color.FromArgb(64, 64, 64), ForeColor = Color.White };
+            trackCardOpacity.ValueChanged += (s, e) => numCardOpacity.Value = trackCardOpacity.Value;
+            numCardOpacity.ValueChanged += (s, e) => trackCardOpacity.Value = (int)numCardOpacity.Value;
+            cardPanel.Controls.Add(trackCardOpacity);
+            cardPanel.Controls.Add(numCardOpacity);
+            AddSettingRow(layout, "卡片透明度:", cardPanel, 1);
+
+            AddSeparator(layout, 2);
+
+            // 字体颜色
+            AddSectionHeader(layout, "字体颜色", 3);
+            FlowLayoutPanel colorPanel = new FlowLayoutPanel { FlowDirection = FlowDirection.LeftToRight, AutoSize = true, BackColor = Color.Transparent };
+            rbBlack = new RadioButton { Text = "黑色", Checked = true, AutoSize = true, ForeColor = Color.White };
+            rbWhite = new RadioButton { Text = "白色", AutoSize = true, ForeColor = Color.White };
+            colorPanel.Controls.Add(rbBlack);
+            colorPanel.Controls.Add(rbWhite);
+            AddSettingRow(layout, "颜色:", colorPanel, 4);
+
+            AddSeparator(layout, 5);
+
+            // 顶部条颜色
+            AddSectionHeader(layout, "顶部条颜色", 6);
+            FlowLayoutPanel barColorPanel = new FlowLayoutPanel { FlowDirection = FlowDirection.LeftToRight, AutoSize = true, BackColor = Color.Transparent };
             btnBarColor = new Button { Text = "选择颜色", Width = 80, Height = 25, BackColor = Color.FromArgb(64, 64, 64), ForeColor = Color.White, FlatStyle = FlatStyle.Flat };
             btnBarColor.Click += BtnBarColor_Click;
             pnlBarColorPreview = new Panel { Width = 40, Height = 25, BackColor = Color.Yellow, BorderStyle = BorderStyle.FixedSingle };
-            FlowLayoutPanel panel = new FlowLayoutPanel { FlowDirection = FlowDirection.LeftToRight, AutoSize = true, BackColor = Color.Transparent };
-            panel.Controls.Add(btnBarColor);
-            panel.Controls.Add(pnlBarColorPreview);
-            return panel;
-        }
+            barColorPanel.Controls.Add(btnBarColor);
+            barColorPanel.Controls.Add(pnlBarColorPreview);
+            AddSettingRow(layout, "颜色:", barColorPanel, 7);
 
-        private Control CreateFontColorRadio()
-        {
-            FlowLayoutPanel panel = new FlowLayoutPanel { FlowDirection = FlowDirection.LeftToRight, AutoSize = true, BackColor = Color.Transparent };
-            rbBlack = new RadioButton { Text = "黑色", Checked = true, AutoSize = true, ForeColor = Color.White, BackColor = Color.Transparent };
-            rbWhite = new RadioButton { Text = "白色", AutoSize = true, ForeColor = Color.White, BackColor = Color.Transparent };
-            panel.Controls.Add(rbBlack);
-            panel.Controls.Add(rbWhite);
-            return panel;
-        }
+            AddSeparator(layout, 8);
 
-        private Control CreateFontFamilySelector()
-        {
-            cmbFontFamily = new ComboBox
-            {
-                DropDownStyle = ComboBoxStyle.DropDownList,
-                Width = 150,
-                BackColor = Color.FromArgb(64, 64, 64),
-                ForeColor = Color.White,
-                FlatStyle = FlatStyle.Flat
-            };
+            // 背景效果
+            AddSectionHeader(layout, "背景效果", 9);
+            cmbBgEffect = CreateComboBox(150);
+            cmbBgEffect.Items.AddRange(new object[] { "Mica", "Acrylic", "Aero" });
+            cmbBgEffect.SelectedItem = config.BackgroundEffect;
+            AddSettingRow(layout, "效果:", cmbBgEffect, 10);
+
+            AddSeparator(layout, 11);
+
+            // 字体选择
+            AddSectionHeader(layout, "字体", 12);
+            cmbFontFamily = CreateComboBox(150);
             cmbFontFamily.Items.AddRange(new object[] { "微软雅黑", "黑体", "楷体", "苹方", "自定义" });
             cmbFontFamily.SelectedItem = config.IsCustomFont ? "自定义" : config.FontFamily;
             btnSelectCustomFont = new Button
@@ -1266,69 +990,137 @@ namespace HomeworkViewer
             {
                 btnSelectCustomFont.Visible = cmbFontFamily.SelectedItem?.ToString() == "自定义";
             };
-            FlowLayoutPanel panel = new FlowLayoutPanel { FlowDirection = FlowDirection.LeftToRight, AutoSize = true, BackColor = Color.Transparent };
-            panel.Controls.Add(cmbFontFamily);
-            panel.Controls.Add(btnSelectCustomFont);
-            return panel;
-        }
+            FlowLayoutPanel fontPanel = new FlowLayoutPanel { FlowDirection = FlowDirection.LeftToRight, AutoSize = true, BackColor = Color.Transparent };
+            fontPanel.Controls.Add(cmbFontFamily);
+            fontPanel.Controls.Add(btnSelectCustomFont);
+            AddSettingRow(layout, "选择:", fontPanel, 13);
 
-        private Control CreateBgTypeRadio()
-        {
-            FlowLayoutPanel panel = new FlowLayoutPanel { FlowDirection = FlowDirection.LeftToRight, AutoSize = true, BackColor = Color.Transparent };
-            rbTransparentBg = new RadioButton { Text = "透明背景", Checked = !config.UseBackgroundImage, AutoSize = true, ForeColor = Color.White, BackColor = Color.Transparent };
-            rbImageBg = new RadioButton { Text = "图片背景", Checked = config.UseBackgroundImage, AutoSize = true, ForeColor = Color.White, BackColor = Color.Transparent };
-            panel.Controls.Add(rbTransparentBg);
-            panel.Controls.Add(rbImageBg);
-            Action updateVisibility = () =>
-            {
-                bool useImage = rbImageBg.Checked;
-                txtBgImagePath.Visible = useImage;
-                btnBrowseBgImage.Visible = useImage;
-                cmbBgEffect.Enabled = !useImage;
-            };
-            rbTransparentBg.CheckedChanged += (s, e) => updateVisibility();
-            rbImageBg.CheckedChanged += (s, e) => updateVisibility();
-            return panel;
-        }
+            AddSeparator(layout, 14);
 
-        private Control CreateImagePathSelector()
-        {
-            txtBgImagePath = new TextBox
+            // 鼠标效果
+            AddSectionHeader(layout, "鼠标效果", 15);
+            chkShowMouseGlow = new CheckBox
             {
-                Width = 200,
-                BackColor = Color.FromArgb(64, 64, 64),
+                Text = "显示鼠标跟随光晕",
+                Checked = config.ShowMouseGlow,
+                AutoSize = true,
                 ForeColor = Color.White,
-                BorderStyle = BorderStyle.FixedSingle,
-                Text = config.BackgroundImagePath
+                BackColor = Color.Transparent
             };
-            btnBrowseBgImage = new Button
-            {
-                Text = "浏览",
-                Width = 60,
-                Height = 23,
-                BackColor = Color.FromArgb(64, 64, 64),
-                ForeColor = Color.White,
-                FlatStyle = FlatStyle.Flat
-            };
+            AddSettingRow(layout, "光晕:", chkShowMouseGlow, 16);
+
+            AddSeparator(layout, 17);
+
+            // 背景图片
+            AddSectionHeader(layout, "背景图片", 18);
+            FlowLayoutPanel bgTypePanel = new FlowLayoutPanel { FlowDirection = FlowDirection.LeftToRight, AutoSize = true, BackColor = Color.Transparent };
+            rbTransparentBg = new RadioButton { Text = "透明背景", Checked = !config.UseBackgroundImage, AutoSize = true, ForeColor = Color.White };
+            rbImageBg = new RadioButton { Text = "图片背景", Checked = config.UseBackgroundImage, AutoSize = true, ForeColor = Color.White };
+            bgTypePanel.Controls.Add(rbTransparentBg);
+            bgTypePanel.Controls.Add(rbImageBg);
+            AddSettingRow(layout, "类型:", bgTypePanel, 19);
+
+            // 图片路径（动态可见）
+            FlowLayoutPanel imagePanel = new FlowLayoutPanel { FlowDirection = FlowDirection.LeftToRight, AutoSize = true, BackColor = Color.Transparent };
+            txtBgImagePath = new TextBox { Width = 200, BackColor = Color.FromArgb(64, 64, 64), ForeColor = Color.White, BorderStyle = BorderStyle.FixedSingle };
+            btnBrowseBgImage = new Button { Text = "浏览", Width = 60, Height = 23, BackColor = Color.FromArgb(64, 64, 64), ForeColor = Color.White, FlatStyle = FlatStyle.Flat };
             btnBrowseBgImage.Click += (s, e) =>
             {
                 using (OpenFileDialog ofd = new OpenFileDialog())
                 {
                     ofd.Filter = "图片文件|*.jpg;*.jpeg;*.png;*.bmp";
-                    ofd.Title = "选择背景图片";
                     if (ofd.ShowDialog() == DialogResult.OK)
-                    {
                         txtBgImagePath.Text = ofd.FileName;
-                    }
                 }
             };
-            FlowLayoutPanel panel = new FlowLayoutPanel { FlowDirection = FlowDirection.LeftToRight, AutoSize = true, BackColor = Color.Transparent };
-            panel.Controls.Add(txtBgImagePath);
-            panel.Controls.Add(btnBrowseBgImage);
-            return panel;
+            imagePanel.Controls.Add(txtBgImagePath);
+            imagePanel.Controls.Add(btnBrowseBgImage);
+            Label lblBgImage = new Label { Text = "图片路径:", TextAlign = ContentAlignment.MiddleRight, ForeColor = Color.White, BackColor = Color.Transparent, AutoSize = true };
+            layout.Controls.Add(lblBgImage, 0, 20);
+            layout.Controls.Add(imagePanel, 1, 20);
+            layout.RowCount = 21;
+            layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+
+            // 控制可见性
+            Action updateVisibility = () =>
+            {
+                bool useImage = rbImageBg.Checked;
+                lblBgImage.Visible = useImage;
+                imagePanel.Visible = useImage;
+                cmbBgEffect.Enabled = !useImage;
+            };
+            rbTransparentBg.CheckedChanged += (s, e) => updateVisibility();
+            rbImageBg.CheckedChanged += (s, e) => updateVisibility();
+            updateVisibility();
+
+            appearancePanel.Controls.Add(layout);
+        }
+        private void ShowAppearancePage() => contentPanel.Controls.Add(appearancePanel);
+
+        // ---------- 时间段设置 ----------
+        private Panel timeSlotPanel;
+        private void CreateTimeSlotPage()
+        {
+            timeSlotPanel = CreateScrollablePanel();
+            TableLayoutPanel mainLayout = new TableLayoutPanel
+            {
+                Dock = DockStyle.Top,
+                ColumnCount = 1,
+                RowCount = 7,
+                Padding = new Padding(20),
+                AutoSize = true,
+                BackColor = Color.Transparent
+            };
+            for (int i = 0; i < 7; i++)
+                mainLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+
+            // 通用设置
+            AddSectionHeader(mainLayout, "通用设置", 0);
+            chkShowDueTime = new CheckBox
+            {
+                Text = "显示提交时间（不勾选则隐藏所有界面的提交时间和提醒）",
+                Checked = config.ShowDueTime,
+                AutoSize = true,
+                ForeColor = Color.White,
+                BackColor = Color.Transparent
+            };
+            mainLayout.Controls.Add(chkShowDueTime, 0, 1);
+
+            AddSeparator(mainLayout, 2);
+
+            // 晚修节数
+            AddSectionHeader(mainLayout, "晚修节数", 3);
+            FlowLayoutPanel countPanel = new FlowLayoutPanel { FlowDirection = FlowDirection.LeftToRight, AutoSize = true, BackColor = Color.Transparent };
+            numEveningCount = new NumericUpDown { Minimum = 1, Maximum = 6, Value = config.EveningClassCount, Width = 60, BackColor = Color.FromArgb(64, 64, 64), ForeColor = Color.White };
+            numEveningCount.ValueChanged += NumEveningCount_ValueChanged;
+            countPanel.Controls.Add(numEveningCount);
+            mainLayout.Controls.Add(countPanel, 0, 4);
+
+            // 各节时间段
+            eveningPanel = new FlowLayoutPanel
+            {
+                FlowDirection = FlowDirection.TopDown,
+                WrapContents = false,
+                AutoSize = true,
+                BackColor = Color.Transparent,
+                Margin = new Padding(0, 10, 0, 10)
+            };
+            mainLayout.Controls.Add(eveningPanel, 0, 5);
+
+            // 测试闪烁按钮（默认隐藏）
+            FlowLayoutPanel buttonPanel = new FlowLayoutPanel { FlowDirection = FlowDirection.LeftToRight, AutoSize = true, BackColor = Color.Transparent, Margin = new Padding(0, 10, 0, 0) };
+            btnTestFlash = new Button { Text = "测试闪烁", Width = 100, Height = 30, BackColor = Color.FromArgb(64, 64, 64), ForeColor = Color.White, FlatStyle = FlatStyle.Flat, Visible = false };
+            btnTestFlash.Click += BtnTestFlash_Click;
+            btnStopFlash = new Button { Text = "停止闪烁", Width = 100, Height = 30, BackColor = Color.FromArgb(64, 64, 64), ForeColor = Color.White, FlatStyle = FlatStyle.Flat, Visible = false };
+            btnStopFlash.Click += BtnStopFlash_Click;
+            buttonPanel.Controls.Add(btnTestFlash);
+            buttonPanel.Controls.Add(btnStopFlash);
+            mainLayout.Controls.Add(buttonPanel, 0, 6);
+
+            timeSlotPanel.Controls.Add(mainLayout);
+            UpdateEveningEditors();
         }
 
-        // ---------- 事件处理 ----------
         private void BtnTestFlash_Click(object sender, EventArgs e) => mainForm.StartDebugFlashing();
         private void BtnStopFlash_Click(object sender, EventArgs e) => mainForm.StopDebugFlashing();
 
@@ -1351,7 +1143,7 @@ namespace HomeworkViewer
             {
                 var time = config.EveningClassTimes[i];
                 Panel row = new Panel { Height = 35, Width = 450, BackColor = Color.Transparent };
-                Label lbl = new Label { Text = $"晚修{i + 1}:", Location = new Point(0, 8), AutoSize = true, ForeColor = Color.White, BackColor = Color.Transparent };
+                Label lbl = new Label { Text = $"晚修{i + 1}:", Location = new Point(0, 8), AutoSize = true, ForeColor = Color.White };
                 DateTimePicker startPicker = new DateTimePicker
                 {
                     Format = DateTimePickerFormat.Custom,
@@ -1364,7 +1156,7 @@ namespace HomeworkViewer
                     ForeColor = Color.White
                 };
                 startPickers.Add(startPicker);
-                Label lblTo = new Label { Text = "—", Location = new Point(150, 8), AutoSize = true, ForeColor = Color.White, BackColor = Color.Transparent };
+                Label lblTo = new Label { Text = "—", Location = new Point(150, 8), AutoSize = true, ForeColor = Color.White };
                 DateTimePicker endPicker = new DateTimePicker
                 {
                     Format = DateTimePickerFormat.Custom,
@@ -1385,6 +1177,95 @@ namespace HomeworkViewer
                 row.Controls.Add(previewBar);
                 eveningPanel.Controls.Add(row);
             }
+        }
+        private void ShowTimeSlotPage() => contentPanel.Controls.Add(timeSlotPanel);
+
+        // ---------- 集控管理 ----------
+        private Panel mgmtPanel;
+        private void CreateMgmtPage()
+        {
+            mgmtPanel = CreateScrollablePanel();
+            TableLayoutPanel layout = new TableLayoutPanel
+            {
+                Dock = DockStyle.Top,
+                ColumnCount = 2,
+                RowCount = 9,
+                Padding = new Padding(20),
+                AutoSize = true,
+                BackColor = Color.Transparent
+            };
+            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 100));
+            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            for (int i = 0; i < 9; i++)
+                layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+
+            AddSectionHeader(layout, "远程同步", 0);
+            chkMgmtEnabled = new CheckBox
+            {
+                Text = "从远程服务器同步作业数据",
+                Checked = config.MgmtEnabled,
+                AutoSize = true,
+                ForeColor = Color.White,
+                BackColor = Color.Transparent
+            };
+            layout.Controls.Add(chkMgmtEnabled, 1, 1);
+            layout.Controls.Add(new Label { Text = "", Width = 0, Height = 0 }, 0, 1);
+
+            AddSeparator(layout, 2);
+
+            AddSectionHeader(layout, "清单地址", 3);
+            txtMgmtManifestUrl = new TextBox
+            {
+                Text = config.MgmtManifestUrl,
+                Width = 300,
+                BackColor = Color.FromArgb(64, 64, 64),
+                ForeColor = Color.White,
+                BorderStyle = BorderStyle.FixedSingle
+            };
+            layout.Controls.Add(txtMgmtManifestUrl, 1, 4);
+            layout.Controls.Add(new Label { Text = "", Width = 0, Height = 0 }, 0, 4);
+
+            btnTestMgmtConnection = new Button
+            {
+                Text = "测试连接",
+                Width = 100,
+                Height = 30,
+                BackColor = Color.FromArgb(64, 64, 64),
+                ForeColor = Color.White,
+                FlatStyle = FlatStyle.Flat
+            };
+            btnTestMgmtConnection.Click += BtnTestMgmtConnection_Click;
+            lblMgmtStatus = new Label
+            {
+                Text = "未测试",
+                AutoSize = true,
+                ForeColor = Color.LightGray,
+                BackColor = Color.Transparent
+            };
+            FlowLayoutPanel testPanel = new FlowLayoutPanel { FlowDirection = FlowDirection.LeftToRight, AutoSize = true, BackColor = Color.Transparent };
+            testPanel.Controls.Add(btnTestMgmtConnection);
+            testPanel.Controls.Add(lblMgmtStatus);
+            layout.Controls.Add(testPanel, 1, 5);
+            layout.Controls.Add(new Label { Text = "", Width = 0, Height = 0 }, 0, 5);
+            layout.RowCount = 6;
+            layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+
+            AddSeparator(layout, 6);
+
+            AddSectionHeader(layout, "组织信息", 7);
+            lblMgmtOrgName = new Label
+            {
+                Text = config.OrganizationName,
+                AutoSize = true,
+                ForeColor = Color.LightGreen,
+                BackColor = Color.Transparent,
+                Font = new Font("微软雅黑", 9, FontStyle.Bold)
+            };
+            layout.Controls.Add(lblMgmtOrgName, 1, 8);
+            layout.Controls.Add(new Label { Text = "", Width = 0, Height = 0 }, 0, 8);
+            layout.RowCount = 9;
+
+            mgmtPanel.Controls.Add(layout);
         }
 
         private async void BtnTestMgmtConnection_Click(object sender, EventArgs e)
@@ -1427,6 +1308,89 @@ namespace HomeworkViewer
             }
         }
 
+        private void ShowMgmtPage() => contentPanel.Controls.Add(mgmtPanel);
+
+        // ---------- 关于页面 ----------
+        private Panel aboutPanel;
+        private void CreateAboutPage()
+        {
+            aboutPanel = CreateScrollablePanel();
+            TableLayoutPanel layout = new TableLayoutPanel
+            {
+                Dock = DockStyle.Top,
+                ColumnCount = 1,
+                RowCount = 11,
+                Padding = new Padding(20),
+                AutoSize = true,
+                BackColor = Color.Transparent
+            };
+            for (int i = 0; i < 11; i++)
+                layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+
+            Label lblVersion = new Label { Text = "作业展板 版本 2.1.0", Font = new Font("微软雅黑", 12, FontStyle.Bold), AutoSize = true, ForeColor = Color.White };
+            layout.Controls.Add(lblVersion, 0, 0);
+            Label lblAuthor = new Label { Text = "作者: MaxSui 隋修梁", AutoSize = true, ForeColor = Color.White, Font = new Font("微软雅黑", 10) };
+            layout.Controls.Add(lblAuthor, 0, 1);
+            Label lblCopyright = new Label { Text = "© 2026 MaxSui 保留部分权利\n本软件遵循GNU General Public License 3.0开源协议", AutoSize = true, ForeColor = Color.White };
+            layout.Controls.Add(lblCopyright, 0, 2);
+
+            AddSeparator(layout, 3);
+
+            lblMirrorStatus = new Label
+            {
+                Text = "正在检测镜像站...",
+                AutoSize = true,
+                ForeColor = Color.LightGreen,
+                BackColor = Color.Transparent,
+                Font = new Font("微软雅黑", 9)
+            };
+            layout.Controls.Add(lblMirrorStatus, 0, 4);
+
+            cmbMirrorManual = CreateComboBox(200);
+            cmbMirrorManual.SelectedIndexChanged += async (s, e) =>
+            {
+                if (cmbMirrorManual.SelectedItem != null && cmbMirrorManual.SelectedIndex > 0)
+                {
+                    _mirrorManager.ClearCache();
+                    await UpdateMirrorStatusAsync(lblMirrorStatus);
+                }
+            };
+            layout.Controls.Add(cmbMirrorManual, 0, 5);
+
+            progressDownload = new ProgressBar { Width = 200, Height = 20, Visible = false, Style = ProgressBarStyle.Continuous, Minimum = 0, Maximum = 100 };
+            layout.Controls.Add(progressDownload, 0, 6);
+
+            lblDownloadStatus = new Label { Text = "", AutoSize = true, ForeColor = Color.White, BackColor = Color.Transparent, Font = new Font("微软雅黑", 9), Visible = false };
+            layout.Controls.Add(lblDownloadStatus, 0, 7);
+
+            FlowLayoutPanel updatePanel = new FlowLayoutPanel { FlowDirection = FlowDirection.LeftToRight, AutoSize = true, BackColor = Color.Transparent, Margin = new Padding(0, 10, 0, 0) };
+            btnCheckUpdate = new Button { Text = "检查更新", Width = 100, Height = 30, BackColor = Color.FromArgb(64, 64, 64), ForeColor = Color.White, FlatStyle = FlatStyle.Flat };
+            btnCheckUpdate.Click += btnCheckUpdate_Click;
+            btnSkipVersion = new Button { Text = "跳过", Width = 100, Height = 30, BackColor = Color.FromArgb(64, 64, 64), ForeColor = Color.White, FlatStyle = FlatStyle.Flat, Visible = false };
+            btnSkipVersion.Click += (s, e) => { btnSkipVersion.Visible = false; btnCheckUpdate.Text = "检查更新"; };
+            lblUpdateContent = new Label { Text = "", AutoSize = true, ForeColor = Color.White, BackColor = Color.Transparent, Font = new Font("微软雅黑", 9) };
+            updatePanel.Controls.Add(btnCheckUpdate);
+            updatePanel.Controls.Add(btnSkipVersion);
+            layout.Controls.Add(updatePanel, 0, 8);
+            layout.Controls.Add(lblUpdateContent, 0, 9);
+
+            btnResetAll = new Button
+            {
+                Text = "恢复所有设置为默认",
+                Width = 150,
+                Height = 30,
+                BackColor = Color.FromArgb(64, 64, 64),
+                ForeColor = Color.White,
+                FlatStyle = FlatStyle.Flat,
+                Margin = new Padding(0, 20, 0, 0)
+            };
+            btnResetAll.Click += BtnResetAll_Click;
+            layout.Controls.Add(btnResetAll, 0, 10);
+
+            aboutPanel.Controls.Add(layout);
+        }
+        private void ShowAboutPage() => contentPanel.Controls.Add(aboutPanel);
+
         private async Task UpdateMirrorStatusAsync(Label statusLabel)
         {
             if (this.IsDisposed) return;
@@ -1457,6 +1421,92 @@ namespace HomeworkViewer
                     statusLabel.Text = "⚠️ 镜像检测失败";
                 }));
             }
+        }
+
+        private void BtnResetAll_Click(object sender, EventArgs e)
+        {
+            DialogResult result = MessageBox.Show("确定要将所有设置恢复为默认值吗？此操作不可撤销。", "确认恢复", MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
+            if (result == DialogResult.Yes)
+            {
+                string configPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "Homework", "config.json");
+                try
+                {
+                    if (File.Exists(configPath))
+                        File.Delete(configPath);
+                }
+                catch { }
+
+                config = AppConfig.Load();
+                LoadSettings();
+                mainForm.ApplySettings(config);
+                MessageBox.Show("所有设置已恢复为默认值。", "完成", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+        }
+
+        private void LoadSettings()
+        {
+            cmbFontSize.SelectedIndex = config.FontSizeLevel;
+            numScrollSpeed.Value = config.ScrollSpeed;
+            numAutoPageInterval.Value = config.AutoPageInterval;
+            trackCardOpacity.Value = config.CardOpacity;
+            if (config.FontColorWhite) rbWhite.Checked = true; else rbBlack.Checked = true;
+            pnlBarColorPreview.BackColor = ParseColor(config.BarColor, Color.Yellow);
+            cmbDefaultExportFormat.SelectedItem = config.ExportFormat;
+            cmbFontFamily.SelectedItem = config.IsCustomFont ? "自定义" : config.FontFamily;
+            chkShowMouseGlow.Checked = config.ShowMouseGlow;
+            chkShowDueTime.Checked = config.ShowDueTime;
+            chkMgmtEnabled.Checked = config.MgmtEnabled;
+            txtMgmtManifestUrl.Text = config.MgmtManifestUrl;
+            lblMgmtOrgName.Text = config.OrganizationName;
+            rbTransparentBg.Checked = !config.UseBackgroundImage;
+            rbImageBg.Checked = config.UseBackgroundImage;
+            txtBgImagePath.Text = config.BackgroundImagePath;
+        }
+
+        private void BtnOK_Click(object sender, EventArgs e)
+        {
+            config.FontSizeLevel = cmbFontSize.SelectedIndex;
+            config.CardOpacity = trackCardOpacity.Value;
+            config.FontColorWhite = rbWhite.Checked;
+            config.ScrollSpeed = (int)numScrollSpeed.Value;
+            config.AutoPageInterval = (int)numAutoPageInterval.Value;
+            config.BackgroundEffect = cmbBgEffect.SelectedItem?.ToString() ?? "Mica";
+            config.ExportFormat = cmbDefaultExportFormat.SelectedItem?.ToString() ?? "txt";
+            config.ShowMouseGlow = chkShowMouseGlow.Checked;
+            config.ShowDueTime = chkShowDueTime.Checked;
+
+            string fontSelection = cmbFontFamily.SelectedItem?.ToString();
+            if (fontSelection == "自定义")
+            {
+                config.IsCustomFont = true;
+            }
+            else
+            {
+                config.IsCustomFont = false;
+                config.FontFamily = fontSelection;
+            }
+
+            config.MgmtEnabled = chkMgmtEnabled.Checked;
+            config.MgmtManifestUrl = txtMgmtManifestUrl.Text.Trim();
+
+            config.EveningClassCount = (int)numEveningCount.Value;
+            config.EveningClassTimes.Clear();
+            for (int i = 0; i < startPickers.Count; i++)
+                config.EveningClassTimes.Add(new EveningClassTime { Start = startPickers[i].Value.ToString("HH:mm"), End = endPickers[i].Value.ToString("HH:mm") });
+
+            string bgPath = txtBgImagePath.Text.Trim();
+            if (!string.IsNullOrEmpty(bgPath) && !Path.IsPathRooted(bgPath))
+            {
+                bgPath = Path.Combine(Application.StartupPath, bgPath);
+            }
+            config.UseBackgroundImage = rbImageBg.Checked;
+            config.BackgroundImagePath = bgPath;
+
+            config.Save();
+
+            mainForm.ApplySettings(config);
+            this.DialogResult = DialogResult.OK;
+            this.Close();
         }
 
         private void BtnSelectCustomFont_Click(object sender, EventArgs e)
@@ -1504,113 +1554,6 @@ namespace HomeworkViewer
             }
             catch { }
             return defaultColor;
-        }
-
-        private void BtnResetAll_Click(object sender, EventArgs e)
-        {
-            DialogResult result = MessageBox.Show("确定要将所有设置恢复为默认值吗？此操作不可撤销。", "确认恢复", MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
-            if (result == DialogResult.Yes)
-            {
-                string configPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "Homework", "config.json");
-                try
-                {
-                    if (File.Exists(configPath))
-                        File.Delete(configPath);
-                }
-                catch { }
-
-                config = AppConfig.Load();
-                LoadSettings();
-                mainForm.ApplySettings(config);
-                MessageBox.Show("所有设置已恢复为默认值。", "完成", MessageBoxButtons.OK, MessageBoxIcon.Information);
-            }
-        }
-
-        // ---------- 加载与保存 ----------
-        private void LoadSettings()
-        {
-            cmbMode.SelectedItem = config.LastMode;
-            if (cmbMode.SelectedIndex == -1 && cmbMode.Items.Count > 0) cmbMode.SelectedIndex = 0;
-
-            if (config.FontSizeLevel >= 0 && config.FontSizeLevel < cmbFontSize.Items.Count)
-                cmbFontSize.SelectedIndex = config.FontSizeLevel;
-            else if (cmbFontSize.Items.Count > 0)
-                cmbFontSize.SelectedIndex = 0;
-
-            trackCardOpacity.Value = config.CardOpacity;
-            numCardOpacity.Value = config.CardOpacity;
-            trackBgOpacity.Value = config.BackgroundOpacity;
-            numBgOpacity.Value = config.BackgroundOpacity;
-            if (config.FontColorWhite) rbWhite.Checked = true; else rbBlack.Checked = true;
-            pnlBarColorPreview.BackColor = ParseColor(config.BarColor, Color.Yellow);
-            numScrollSpeed.Value = config.ScrollSpeed;
-            cmbDefaultExportFormat.SelectedItem = config.ExportFormat;
-            cmbFontFamily.SelectedItem = config.IsCustomFont ? "自定义" : config.FontFamily;
-            chkShowMouseGlow.Checked = config.ShowMouseGlow;
-            chkShowDueTime.Checked = config.ShowDueTime;
-            chkMgmtEnabled.Checked = config.MgmtEnabled;
-            txtMgmtManifestUrl.Text = config.MgmtManifestUrl;
-            lblMgmtOrgName.Text = config.OrganizationName;
-            chkUseWebView2.Checked = config.UseWebView2;
-
-            rbTransparentBg.Checked = !config.UseBackgroundImage;
-            rbImageBg.Checked = config.UseBackgroundImage;
-            txtBgImagePath.Text = config.BackgroundImagePath;
-        }
-
-        private void BtnOK_Click(object sender, EventArgs e)
-        {
-            bool oldUseWebView2 = config.UseWebView2;
-
-            config.LastMode = cmbMode.SelectedItem?.ToString() ?? "大理";
-            config.FontSizeLevel = cmbFontSize.SelectedIndex;
-            config.CardOpacity = trackCardOpacity.Value;
-            config.BackgroundOpacity = trackBgOpacity.Value;
-            config.FontColorWhite = rbWhite.Checked;
-            config.ScrollSpeed = (int)numScrollSpeed.Value;
-            config.BackgroundEffect = cmbBgEffect.SelectedItem?.ToString() ?? "Mica";
-            config.ExportFormat = cmbDefaultExportFormat.SelectedItem?.ToString() ?? "txt";
-            config.ShowMouseGlow = chkShowMouseGlow.Checked;
-            config.ShowDueTime = chkShowDueTime.Checked;
-
-            string fontSelection = cmbFontFamily.SelectedItem?.ToString();
-            if (fontSelection == "自定义")
-                config.IsCustomFont = true;
-            else
-            {
-                config.IsCustomFont = false;
-                config.FontFamily = fontSelection;
-            }
-
-            config.MgmtEnabled = chkMgmtEnabled.Checked;
-            config.MgmtManifestUrl = txtMgmtManifestUrl.Text.Trim();
-
-            config.EveningClassCount = (int)numEveningCount.Value;
-            config.EveningClassTimes.Clear();
-            for (int i = 0; i < startPickers.Count; i++)
-                config.EveningClassTimes.Add(new EveningClassTime { Start = startPickers[i].Value.ToString("HH:mm"), End = endPickers[i].Value.ToString("HH:mm") });
-
-            string bgPath = txtBgImagePath.Text.Trim();
-            if (!string.IsNullOrEmpty(bgPath) && !Path.IsPathRooted(bgPath))
-                bgPath = Path.Combine(Application.StartupPath, bgPath);
-            config.UseBackgroundImage = rbImageBg.Checked;
-            config.BackgroundImagePath = bgPath;
-
-            // 新增 WebView2 选项
-            config.UseWebView2 = chkUseWebView2.Checked;
-
-            config.Save();
-
-            mainForm.ApplySettings(config);
-            this.DialogResult = DialogResult.OK;
-
-            // 如果 WebView2 使用状态发生变化，提示重启
-            if (config.UseWebView2 != oldUseWebView2)
-            {
-                MessageBox.Show("WebView2 渲染设置已更改，请重启应用以生效。", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
-            }
-
-            this.Close();
         }
     }
 }

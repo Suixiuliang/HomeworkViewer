@@ -1,5 +1,3 @@
-// Copyright (c) 2026 MaxSui 隋修梁. All rights reserved.
-// Licensed under the GPL3.0 License. See LICENSE in the project root for license information.
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -73,7 +71,6 @@ namespace HomeworkViewer
             {
                 string json = await _httpClient.GetStringAsync(url);
                 var subjects = JsonSerializer.Deserialize<List<string>>(json);
-                // 科目列表暂不使用，可保留备用
             }
             catch { }
         }
@@ -94,10 +91,7 @@ namespace HomeworkViewer
                         Directory.CreateDirectory(dir);
                     File.WriteAllText(localPath, json);
                 }
-                catch (HttpRequestException)
-                {
-                    // 远程不存在该日期的作业，跳过
-                }
+                catch (HttpRequestException) { }
             }
         }
 

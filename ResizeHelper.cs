@@ -1,5 +1,3 @@
-// Copyright (c) 2026 MaxSui 隋修梁. All rights reserved.
-// Licensed under the GPL3.0 License. See LICENSE in the project root for license information.
 using System;
 using System.Drawing;
 using System.Windows.Forms;
@@ -33,17 +31,8 @@ namespace HomeworkViewer
             _onResize = onResize;
         }
 
-        private void OnMouseDown(object sender, MouseEventArgs e)
-        {
-            // 简化：检测鼠标是否在网格线附近（实际应根据卡片坐标计算）
-            // 此处示例仅演示思路，实际需根据具体布局实现
-        }
-
-        private void OnMouseMove(object sender, MouseEventArgs e)
-        {
-            // 改变光标形状
-        }
-
+        private void OnMouseDown(object sender, MouseEventArgs e) { }
+        private void OnMouseMove(object sender, MouseEventArgs e) { }
         private void OnMouseUp(object sender, MouseEventArgs e)
         {
             if (_isResizing)

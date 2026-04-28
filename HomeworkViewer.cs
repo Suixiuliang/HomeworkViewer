@@ -1,14 +1,12 @@
 #nullable disable
 using System;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
 using System.Windows.Forms;
-using Microsoft.Web.WebView2.WinForms;
 using Timer = System.Windows.Forms.Timer;
 
 namespace HomeworkViewer
@@ -25,6 +23,7 @@ namespace HomeworkViewer
         private Point SETTINGS_BTN_POS;
         private readonly Rectangle GRID_AREA = new Rectangle(0, 47, 1200, 631);
         private const int GRID_PADDING = 20, ROUND_RADIUS = 5;
+
         private const int BAR_HEIGHT = 46, BAR_Y = 0, BAR_PADDING = 20;
 
         // 顶部下拉栏
@@ -36,10 +35,22 @@ namespace HomeworkViewer
         private Timer _animationTimer;
         private List<Animation> _animations = new List<Animation>();
         private Dictionary<int, Animation> _cardAnimations = new Dictionary<int, Animation>();
-        private Animation _fadeAnimation;
+        private Dictionary<int, float> _flyOutProgress = new Dictionary<int, float>();
+        private Dictionary<int, float> _flyInOffsets = new Dictionary<int, float>();
+        private int _flyInAnimationsRemaining = 0;
         private string _oldRotationText = "";
 
-        // 轮播滑动动画（已取消）
+        // 虚线卡片独立动画
+        private float _virtualCardOffset = 0f;
+        private Animation _virtualCardAnim = null;
+        private float _virtualCardFlyOutOffset = 0f;
+        private Animation _virtualCardFlyOutAnim = null;
+        private bool _showVirtualAddCardPage = false; // 是否显示虚拟添加卡片页面（仅当最后一屏已满时）
+
+        // 淡入动画（用于添加卡片）
+        private Dictionary<int, float> _fadeInProgress = new Dictionary<int, float>();
+
+        // 轮播滑动动画
         private bool _isSliding = false;
         private float _slideProgress = 0;
         private int _slidePhase = 0;
@@ -50,7 +61,6 @@ namespace HomeworkViewer
 
         // Mica/亚克力
         private bool _micaEnabled = false;
-        private int _backgroundAlpha = 32;
         private Image _backgroundImage = null;
 
         // 状态
@@ -62,11 +72,12 @@ namespace HomeworkViewer
         private Timer rotationTimer;
         private const int rotationInterval = 10000;
 
-        // 内联编辑（已弃用）
+        // 内联编辑
         private Control inlineEditControl;
         private int editingSubjectIndex = -1;
         private enum EditFieldType { None, Subject, DueTime }
         private EditFieldType currentEditType = EditFieldType.None;
+        private bool _isCleaningUp = false;
 
         // 数据
         private HomeworkData homeworkData = new HomeworkData();
@@ -76,9 +87,39 @@ namespace HomeworkViewer
         // 按钮矩形
         private Rectangle rotateBtnRect, editBtnRect, historyBtnRect, fullscreenBtnRect, backBtnRect, leftArrowRect, rightArrowRect, settingsBtnRect, minimizeBtnRect, closeBtnRect, exportBtnRect;
         private Rectangle expandBtnRect, collapseBtnRect;
+        private Rectangle manageBtnRect, addCardBtnRect;
+        private bool _originalButtonsExpanded;
 
-        // 网格
+        // 网格分页
         private List<Rectangle> gridRects = new List<Rectangle>();
+        private int _currentPage = 0;
+        private int TotalPages
+        {
+            get
+            {
+                int realPages = (int)Math.Ceiling(appConfig.CustomSubjects.Count / (double)CARDS_PER_PAGE);
+                if (_isCardEditingMode && _showVirtualAddCardPage)
+                    return realPages + 1;
+                return realPages;
+            }
+        }
+        private const int CARDS_PER_PAGE = 6;
+        private Timer _autoPageTimer;
+        private int _autoPageInterval = 10;
+        private bool _isCardEditingMode = false;
+        private Timer _shakeTimer;
+        private float _shakeAngle = 0;
+        private bool _shakeDirection = true;
+        private float _shakeStep = 0.6f;
+        private float _shakeMaxAngle = 0.5f;
+
+        // 拖拽排序
+        private bool _isDragging = false;
+        private int _dragStartIndex = -1;
+        private int _dragOverIndex = -1;
+        private Point _dragStartPoint;
+        private List<Rectangle> _deleteButtonRects = new List<Rectangle>();
+        private Rectangle _virtualAddCardRect;
 
         // 字体
         private Font font12, font20, font24, font30, font22, font36, hintFont, buttonFont, fontSmall;
@@ -99,14 +140,13 @@ namespace HomeworkViewer
         private bool _inSizeMove = false;
 
         // 图片资源
-        private Image buttonImage, historyBtnImage, backBtnImage, leftArrowImage, rightArrowImage;
+        private Image buttonImage, historyBtnImage, backBtnImage, leftArrowImage, rightArrowImage, manageCardImage, addCardImage;
         private Dictionary<string, Image> buttonIcons = new Dictionary<string, Image>();
 
         // 配置
         private AppConfig appConfig;
         private float[] fontScales = { 0.8f, 1.0f, 1.2f };
         private string[] currentSubjects;
-        private bool _useWebView2 = false;
 
         // 窗口状态保存
         private Size _savedClientSize;
@@ -120,13 +160,13 @@ namespace HomeworkViewer
 
         // 按钮按下标志
         private bool _settingsPressed = false, _rotatePressed = false, _editPressed = false, _historyPressed = false, _fullscreenPressed = false, _backPressed = false, _minimizePressed = false, _closePressed = false, _expandPressed = false, _collapsePressed = false, _exportPressed = false;
+        private bool _managePressed = false, _addCardPressed = false;
 
         // 收纳
         private bool _buttonsExpanded = false;
 
-        // 模式切换下拉框
+        // 模式切换下拉框（废弃）
         private ComboBox modeComboBox;
-        private List<ComboBox> timeComboBoxes = new List<ComboBox>();
 
         // 时间提醒
         private Timer timeCheckTimer;
@@ -145,7 +185,7 @@ namespace HomeworkViewer
         private const int FLASH_INTERVAL = 100;
         private float _laserOffset = 0f;
 
-        // 滚动（用于 GDI+ 模式）
+        // 滚动
         private Timer scrollTimer;
         private Dictionary<int, float> scrollOffsets = new Dictionary<int, float>();
         private Dictionary<int, bool> scrollPaused = new Dictionary<int, bool>();
@@ -155,104 +195,26 @@ namespace HomeworkViewer
         // 背景效果
         private string _currentBackgroundEffect = "Mica";
         private bool _isWin10OrAbove = false;
-        private bool _isWin10 = false;
         private bool _sizing = false;
 
-        // 未使用的 Markdown 滚动字段（兼容旧代码）
-        private float _markdownScrollOffset = 0f;
-        private bool _markdownScrollPaused = false;
-        private DateTime _markdownPauseStart = DateTime.Now;
-        private float _markdownTotalHeight = 0;
+        // 行列调整
+        private int[] _rowHeights = new int[2];
+        private int[] _colWidths = new int[3];
+        private bool _isResizing = false;
+        private int _resizeTargetRow = -1, _resizeTargetCol = -1, _resizeStartX, _resizeStartY, _originalHeight, _originalWidth;
 
-        // 鼠标跟随光晕坐标
-        private Point _mouseVirtualPos = new Point(-1000, -1000);
-        private bool _hideMouseGlow = false;
-        private bool _suspendMouseGlow = false;
+        private int _lastFlyDirection = 1;
         private bool _isFlyingIn = false;
 
-        // 光晕透明度控制
-        private float _mouseGlowAlpha = 1.0f;
-        private Animation _mouseGlowFadeAnimation;
-        private Animation _mouseGlowFadeOutAnimation;
-        private bool _mouseInside = true;
-        private int _flyInAnimationsRemaining = 0;
-
-        // 涟漪效果
-        private Point _rippleCenter = new Point(-1, -1);
-        private float _rippleRadius = 0;
-        private float _rippleAlpha = 0;
-        private Animation _rippleAnimation;
-        private bool _inRipple = false;
-
-        // ========== WebView2 相关 ==========
-        private List<WebView2> cardWebViews = new List<WebView2>();
-        private WebView2 rotationWebView;
-        private bool webView2Initialized = false;
-
-        // ========== 编辑模式下的纯文本编辑框（两种模式共用） ==========
-        private List<TextBox> plainTextEditors = new List<TextBox>();
-
-        // ========== Markdown 渲染 HTML 模板（仅 WebView2 模式使用） ==========
-        private const string MarkdownHtmlTemplate = @"<!DOCTYPE html>
-<html>
-<head>
-    <meta charset=""UTF-8"">
-    <meta name=""viewport"" content=""width=device-width, initial-scale=1.0"">
-    <style>
-        body {
-            font-family: 'Microsoft YaHei', 'Segoe UI', -apple-system, BlinkMacSystemFont, 'Helvetica Neue', sans-serif;
-            margin: 12px;
-            padding: 0;
-            background-color: transparent;
-            color: {textColor} !important;
-            font-size: {fontSize}px;
-            line-height: 1.5;
-            overflow-y: auto;
-            overflow-x: hidden;
+        // 周末延续
+        private DateTime GetEffectiveDate(DateTime date)
+        {
+            if (!appConfig.ExtendFridayHomeworkToWeekend) return date;
+            if (date.DayOfWeek == DayOfWeek.Saturday) return date.AddDays(-1);
+            if (date.DayOfWeek == DayOfWeek.Sunday) return date.AddDays(-2);
+            return date;
         }
-        body * { color: {textColor} !important; }
-        pre { background-color: #2d2d2d; padding: 8px; border-radius: 6px; overflow-x: auto; }
-        code { font-family: 'Consolas', 'Courier New', monospace; background-color: rgba(0,0,0,0.05); padding: 2px 4px; border-radius: 4px; }
-        blockquote { border-left: 4px solid #ccc; margin: 0; padding-left: 16px; color: #666; }
-        table { border-collapse: collapse; width: 100%; }
-        th, td { border: 1px solid #ddd; padding: 6px; text-align: left; }
-        th { background-color: #f2f2f2; }
-        a { color: #0366d6; text-decoration: none; }
-        a:hover { text-decoration: underline; }
-        ::-webkit-scrollbar { width: 8px; height: 8px; }
-        ::-webkit-scrollbar-track { background: #f1f1f1; border-radius: 4px; }
-        ::-webkit-scrollbar-thumb { background: #888; border-radius: 4px; }
-        ::-webkit-scrollbar-thumb:hover { background: #555; }
-    </style>
-    <link rel=""stylesheet"" href=""https://cdn.jsdelivr.net/npm/katex@0.16.0/dist/katex.min.css"">
-    <script src=""https://cdn.jsdelivr.net/npm/markdown-it@13.0.1/dist/markdown-it.min.js""></script>
-    <script src=""https://cdn.jsdelivr.net/npm/markdown-it-texmath@1.0.0/texmath.js""></script>
-    <script src=""https://cdn.jsdelivr.net/npm/katex@0.16.0/dist/katex.min.js""></script>
-    <script>
-        var md = window.markdownit({
-            html: true,
-            breaks: true,
-            linkify: true
-        }).use(texmath, {
-            engine: katex,
-            delimiters: ['dollars', 'brackets'],
-            katexOptions: { macros: {} }
-        });
-        function render() {
-            var raw = document.getElementById('raw').innerText;
-            var result = md.render(raw);
-            document.getElementById('content').innerHTML = result;
-        }
-    </script>
-</head>
-<body>
-    <pre id=""raw"" style=""display:none;"">{markdownText}</pre>
-    <div id=""content""></div>
-    <script>render();</script>
-</body>
-</html>";
 
-        // ------------------------------ 构造函数 ------------------------------
         public HomeworkViewer()
         {
             SETTINGS_BTN_POS = new Point(ROTATE_BTN_POS.X - BTN_SQUARE_SIZE - 10, 13);
@@ -268,8 +230,8 @@ namespace HomeworkViewer
             ResizeRedraw = false;
 
             appConfig = AppConfig.Load();
-            _useWebView2 = appConfig.UseWebView2;
-            _backgroundAlpha = (int)(appConfig.BackgroundOpacity / 100f * 255);
+            if (appConfig.CustomSubjects == null || appConfig.CustomSubjects.Count == 0)
+                appConfig.CustomSubjects = new List<string> { "语文", "数学", "英语", "物理", "化学", "生物" };
             ApplyFontSettings();
             UpdateSubjectsByMode();
             CalculateGridRects();
@@ -304,7 +266,9 @@ namespace HomeworkViewer
             };
             _animationTimer.Start();
 
-            this.MouseClick += OnMouseClick;
+            InitAutoPageTimer();
+
+            this.MouseClick += new MouseEventHandler(OnMouseClick);
             this.MouseDoubleClick += OnMouseDoubleClick;
             this.MouseDown += OnMouseDown;
             this.MouseUp += OnMouseUp;
@@ -322,273 +286,12 @@ namespace HomeworkViewer
             ApplyBackgroundEffect(appConfig.BackgroundEffect);
             CheckEveningClassStates();
 
+            _rowHeights[0] = _rowHeights[1] = 0;
+            _colWidths[0] = _colWidths[1] = _colWidths[2] = 0;
+
             ManagementHelper.CheckForUpdatesAsync(appConfig, (updated) => { if (updated) Invalidate(); });
-
-            if (_useWebView2)
-                InitializeWebView2Async();
-            else
-                webView2Initialized = false;
         }
 
-        // ------------------------------ WebView2 初始化 ------------------------------
-        private async void InitializeWebView2Async()
-        {
-            if (!_useWebView2) return;
-            try
-            {
-                var env = await Microsoft.Web.WebView2.Core.CoreWebView2Environment.CreateAsync();
-                webView2Initialized = true;
-                if (!rotationMode && !EditMode && !IsDisposed)
-                {
-                    this.Invoke((MethodInvoker)(() => RefreshAllWebView2Content()));
-                }
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show($"WebView2 初始化失败: {ex.Message}\n\nMarkdown 渲染将不可用，请安装 WebView2 运行时。", "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-            }
-        }
-
-        // ------------------------------ EditMode 属性 ------------------------------
-        private bool EditMode
-        {
-            get => editMode;
-            set
-            {
-                if (editMode != value)
-                {
-                    editMode = value;
-                    if (editMode)
-                    {
-                        // 进入编辑模式：销毁只读控件（WebView2 或 GDI+ 无需销毁，但需隐藏文本绘制），创建纯文本编辑框
-                        if (_useWebView2)
-                            DestroyAllWebView2();
-                        // 注意：GDI+ 模式不需要销毁控件，只需在 DrawGridBackground 中跳过绘制文本（通过 editMode 标志控制）
-                        CreateTimeComboBoxes();
-                        CreatePlainTextEditors();
-                        scrollOffsets.Clear();
-                        scrollPaused.Clear();
-                        pauseStartTime.Clear();
-                    }
-                    else
-                    {
-                        // 退出编辑模式：销毁纯文本编辑框和时间下拉框，根据模式重建只读视图
-                        DestroyPlainTextEditors();
-                        DestroyTimeComboBoxes();
-                        if (_useWebView2)
-                        {
-                            RecreateWebView2ForGrid();
-                            RefreshAllWebView2Content();
-                        }
-                        // GDI+ 模式无需重建，只需重绘即可
-                        scrollOffsets.Clear();
-                        scrollPaused.Clear();
-                        pauseStartTime.Clear();
-                        _markdownScrollOffset = 0f;
-                        _markdownScrollPaused = false;
-                        _markdownPauseStart = DateTime.Now;
-                        _markdownTotalHeight = 0;
-                    }
-                    Invalidate();
-                }
-            }
-        }
-
-        // ------------------------------ 纯文本编辑框管理（编辑模式共用） ------------------------------
-        private void CreatePlainTextEditors()
-        {
-            DestroyPlainTextEditors();
-            for (int i = 0; i < gridRects.Count && i < currentSubjects.Length; i++)
-            {
-                string subject = currentSubjects[i];
-                string content = homeworkData.Subjects.ContainsKey(subject) ? homeworkData.Subjects[subject] : "";
-                Rectangle textArea = GetContentArea(i);
-                Point screenLoc = MapToScreen(textArea.Location);
-                Size screenSize = new Size((int)(textArea.Width * scaleFactor), (int)(textArea.Height * scaleFactor));
-
-                var textBox = new TextBox
-                {
-                    Multiline = true,
-                    WordWrap = true,
-                    ScrollBars = ScrollBars.Vertical,
-                    Location = screenLoc,
-                    Size = screenSize,
-                    Text = content,
-                    Font = font30,
-                    BorderStyle = BorderStyle.FixedSingle,
-                    BackColor = Color.FromArgb(40, 40, 40),
-                    ForeColor = Color.White,
-                    Tag = i
-                };
-                textBox.TextChanged += PlainTextBox_TextChanged;
-                textBox.LostFocus += PlainTextBox_LostFocus;
-                Controls.Add(textBox);
-                plainTextEditors.Add(textBox);
-            }
-        }
-
-        private void DestroyPlainTextEditors()
-        {
-            foreach (var tb in plainTextEditors)
-            {
-                if (tb != null && !tb.IsDisposed)
-                {
-                    tb.TextChanged -= PlainTextBox_TextChanged;
-                    tb.LostFocus -= PlainTextBox_LostFocus;
-                    Controls.Remove(tb);
-                    tb.Dispose();
-                }
-            }
-            plainTextEditors.Clear();
-        }
-
-        private void PlainTextBox_TextChanged(object sender, EventArgs e)
-        {
-            var tb = sender as TextBox;
-            if (tb == null) return;
-            int index = (int)tb.Tag;
-            if (index >= 0 && index < currentSubjects.Length)
-            {
-                string subject = currentSubjects[index];
-                homeworkData.Subjects[subject] = tb.Text;
-            }
-        }
-
-        private void PlainTextBox_LostFocus(object sender, EventArgs e)
-        {
-            SaveHomeworkData();
-        }
-
-        // ------------------------------ WebView2 管理（仅 _useWebView2 时使用） ------------------------------
-        private void CreateWebView2ForCard(int index, Rectangle virtualRect)
-        {
-            if (!_useWebView2 || !webView2Initialized) return;
-            if (index >= cardWebViews.Count)
-            {
-                var webView = new WebView2();
-                webView.Visible = false;
-                webView.DefaultBackgroundColor = Color.Transparent;
-                this.Controls.Add(webView);
-                cardWebViews.Add(webView);
-            }
-            var wv = cardWebViews[index];
-            wv.Visible = !editMode && !rotationMode;
-            UpdateWebView2Position(wv, virtualRect);
-            string subject = currentSubjects[index];
-            string content = homeworkData.Subjects.ContainsKey(subject) ? homeworkData.Subjects[subject] : "";
-            _ = UpdateWebView2Content(wv, content);
-        }
-
-        private async Task UpdateWebView2Content(WebView2 webView, string markdownText)
-        {
-            if (webView == null || !webView2Initialized) return;
-            if (string.IsNullOrWhiteSpace(markdownText))
-                markdownText = "*（无作业内容）*";
-
-            string textColorHex = appConfig.FontColorWhite ? "#FFFFFF" : "#000000";
-            int fontSize = (int)(font30.SizeInPoints * 1.2f);
-            string html = MarkdownHtmlTemplate
-                .Replace("{textColor}", textColorHex)
-                .Replace("{fontSize}", fontSize.ToString())
-                .Replace("{markdownText}", markdownText.Replace("\\", "\\\\").Replace("`", "\\`").Replace("$", "\\$"));
-            try
-            {
-                await webView.EnsureCoreWebView2Async();
-                webView.CoreWebView2.NavigateToString(html);
-            }
-            catch (Exception ex)
-            {
-                Debug.WriteLine($"WebView2 导航失败: {ex.Message}");
-            }
-        }
-
-        private void UpdateWebView2Position(WebView2 webView, Rectangle virtualRect)
-        {
-            if (webView == null) return;
-            Point screenLoc = MapToScreen(virtualRect.Location);
-            Size screenSize = new Size((int)(virtualRect.Width * scaleFactor), (int)(virtualRect.Height * scaleFactor));
-            webView.Location = screenLoc;
-            webView.Size = screenSize;
-        }
-
-        private void UpdateWebView2Positions()
-        {
-            if (rotationMode && rotationWebView != null)
-            {
-                Rectangle webViewRect = new Rectangle(150, 230, 900, 345);
-                UpdateWebView2Position(rotationWebView, webViewRect);
-            }
-            else if (!EditMode && !rotationMode && _useWebView2)
-            {
-                for (int i = 0; i < gridRects.Count && i < cardWebViews.Count; i++)
-                {
-                    Rectangle textArea = GetContentArea(i);
-                    UpdateWebView2Position(cardWebViews[i], textArea);
-                }
-            }
-        }
-
-        private void DestroyAllWebView2()
-        {
-            foreach (var wv in cardWebViews)
-            {
-                if (wv != null && !wv.IsDisposed)
-                    wv.Dispose();
-            }
-            cardWebViews.Clear();
-            if (rotationWebView != null && !rotationWebView.IsDisposed)
-            {
-                rotationWebView.Dispose();
-                rotationWebView = null;
-            }
-        }
-
-        private void RecreateWebView2ForGrid()
-        {
-            if (!_useWebView2) return;
-            DestroyAllWebView2();
-            for (int i = 0; i < gridRects.Count && i < currentSubjects.Length; i++)
-            {
-                Rectangle textArea = GetContentArea(i);
-                CreateWebView2ForCard(i, textArea);
-            }
-        }
-
-        private async void RefreshAllWebView2Content()
-        {
-            if (!_useWebView2 || !webView2Initialized) return;
-            for (int i = 0; i < currentSubjects.Length && i < cardWebViews.Count; i++)
-            {
-                string subject = currentSubjects[i];
-                string content = homeworkData.Subjects.ContainsKey(subject) ? homeworkData.Subjects[subject] : "";
-                await UpdateWebView2Content(cardWebViews[i], content);
-            }
-            if (rotationWebView != null && rotationMode && rotationIndex < currentSubjects.Length)
-            {
-                string subject = currentSubjects[rotationIndex];
-                string content = homeworkData.Subjects.ContainsKey(subject) ? homeworkData.Subjects[subject] : "";
-                await UpdateWebView2Content(rotationWebView, content);
-            }
-        }
-
-        private void CreateRotationWebView()
-        {
-            if (!_useWebView2 || !webView2Initialized) return;
-            if (rotationWebView == null)
-            {
-                rotationWebView = new WebView2();
-                rotationWebView.DefaultBackgroundColor = Color.Transparent;
-                this.Controls.Add(rotationWebView);
-            }
-            rotationWebView.Visible = true;
-            Rectangle webViewRect = new Rectangle(150, 230, 900, 345);
-            UpdateWebView2Position(rotationWebView, webViewRect);
-            string subject = currentSubjects[rotationIndex];
-            string content = homeworkData.Subjects.ContainsKey(subject) ? homeworkData.Subjects[subject] : "";
-            _ = UpdateWebView2Content(rotationWebView, content);
-        }
-
-        // ------------------------------ 辅助方法 ------------------------------
         private class BufferedPanel : Panel
         {
             public BufferedPanel()
@@ -600,7 +303,12 @@ namespace HomeworkViewer
 
         private void OnKeyDown(object sender, KeyEventArgs e)
         {
-            if (e.Control && e.KeyCode == Keys.I)
+            if (e.KeyCode == Keys.F11)
+            {
+                ToggleFullscreen();
+                e.Handled = true;
+            }
+            else if (e.Control && e.KeyCode == Keys.I)
             {
                 using (var settingsForm = new SettingsForm(this))
                 {
@@ -608,9 +316,16 @@ namespace HomeworkViewer
                 }
                 e.Handled = true;
             }
-            else if (e.KeyCode == Keys.F11)
+            else if ((e.KeyCode == Keys.Left || e.KeyCode == Keys.Right || e.KeyCode == Keys.Up || e.KeyCode == Keys.Down) &&
+                     !_isCardEditingMode && !rotationMode && TotalPages > 1)
             {
-                ToggleFullscreen();
+                int newPage;
+                if (e.KeyCode == Keys.Left || e.KeyCode == Keys.Up)
+                    newPage = (_currentPage - 1 + TotalPages) % TotalPages;
+                else
+                    newPage = (_currentPage + 1) % TotalPages;
+                int direction = (e.KeyCode == Keys.Left || e.KeyCode == Keys.Up) ? 1 : -1;
+                SwitchToPage(newPage, direction);
                 e.Handled = true;
             }
         }
@@ -619,7 +334,6 @@ namespace HomeworkViewer
         {
             var os = Environment.OSVersion;
             _isWin10OrAbove = os.Version.Major >= 10;
-            _isWin10 = os.Version.Major == 10 && os.Version.Build < 22000;
         }
 
         private void LoadBackgroundImage()
@@ -628,7 +342,9 @@ namespace HomeworkViewer
             {
                 string fullPath = appConfig.BackgroundImagePath;
                 if (!Path.IsPathRooted(fullPath))
+                {
                     fullPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, fullPath);
+                }
                 if (File.Exists(fullPath))
                 {
                     try
@@ -638,9 +354,15 @@ namespace HomeworkViewer
                     }
                     catch { _backgroundImage = null; }
                 }
-                else _backgroundImage = null;
+                else
+                {
+                    _backgroundImage = null;
+                }
             }
-            else _backgroundImage = null;
+            else
+            {
+                _backgroundImage = null;
+            }
         }
 
         public void ApplyBackgroundEffect(string effect)
@@ -656,10 +378,18 @@ namespace HomeworkViewer
             {
                 switch (effect)
                 {
-                    case "Mica": EnableMica(); break;
-                    case "Acrylic": EnableAcrylic(); break;
-                    case "Aero": EnableAero(); break;
-                    default: EnableMica(); break;
+                    case "Mica":
+                        EnableMica();
+                        break;
+                    case "Acrylic":
+                        EnableAcrylic();
+                        break;
+                    case "Aero":
+                        EnableAero();
+                        break;
+                    default:
+                        EnableMica();
+                        break;
                 }
             }
             catch { }
@@ -817,8 +547,10 @@ namespace HomeworkViewer
                 if (_savedClientSize != Size.Empty)
                     this.ClientSize = _savedClientSize;
                 UpdateScale();
-                if (!_sizing) Invalidate();
-                if (!_micaEnabled) ApplyBackgroundEffect(_currentBackgroundEffect);
+                if (!_sizing)
+                    Invalidate();
+                if (!_micaEnabled)
+                    ApplyBackgroundEffect(_currentBackgroundEffect);
             }
 
             base.WndProc(ref m);
@@ -844,7 +576,8 @@ namespace HomeworkViewer
 
             UpdateScale();
             if (EditMode) CreateTimeComboBoxes();
-            if (!_isWin10OrAbove || !_sizing) Invalidate();
+            if (!_isWin10OrAbove || !_sizing)
+                Invalidate();
 
             if (_drawerPanel != null)
             {
@@ -855,24 +588,6 @@ namespace HomeworkViewer
                     SetDrawerHeight(targetHeight);
                 }
             }
-
-            // 更新动态控件位置
-            if (EditMode)
-            {
-                for (int i = 0; i < plainTextEditors.Count && i < gridRects.Count; i++)
-                {
-                    Rectangle textArea = GetContentArea(i);
-                    Point screenLoc = MapToScreen(textArea.Location);
-                    Size screenSize = new Size((int)(textArea.Width * scaleFactor), (int)(textArea.Height * scaleFactor));
-                    plainTextEditors[i].Location = screenLoc;
-                    plainTextEditors[i].Size = screenSize;
-                }
-            }
-            else if (_useWebView2)
-            {
-                UpdateWebView2Positions();
-            }
-            // GDI+ 模式无需更新额外控件，文本绘制依赖 gridRects 重绘即可
         }
 
         public void ApplySettings(AppConfig newConfig)
@@ -880,34 +595,25 @@ namespace HomeworkViewer
             if (newConfig.ColumnWidth > 2000 || newConfig.ColumnWidth < 0) newConfig.ColumnWidth = 0;
             if (newConfig.RowHeight > 1000 || newConfig.RowHeight < 0) newConfig.RowHeight = 0;
 
-            bool oldUseWebView2 = _useWebView2;
             appConfig = newConfig;
-            _useWebView2 = appConfig.UseWebView2;
             ApplyFontSettings();
             UpdateSubjectsByMode();
-            _backgroundAlpha = (int)(appConfig.BackgroundOpacity / 100f * 255);
             CheckEveningClassStates();
             if (EditMode) CreateTimeComboBoxes();
             LoadBackgroundImage();
             ApplyBackgroundEffect(appConfig.BackgroundEffect);
             CalculateGridRects();
+            LoadImages();
 
-            if (oldUseWebView2 != _useWebView2)
+            _autoPageInterval = appConfig.AutoPageInterval;
+            if (_autoPageTimer != null)
             {
-                MessageBox.Show("WebView2 渲染设置已更改，请重启应用以生效。", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                // 不动态切换，保持当前模式
-            }
-            else
-            {
-                if (_useWebView2)
+                _autoPageTimer.Interval = _autoPageInterval * 1000;
+                if (_autoPageTimer.Enabled && !_isCardEditingMode && !rotationMode)
                 {
-                    if (!EditMode && !rotationMode)
-                    {
-                        RecreateWebView2ForGrid();
-                        RefreshAllWebView2Content();
-                    }
+                    _autoPageTimer.Stop();
+                    _autoPageTimer.Start();
                 }
-                // GDI+ 模式无需重建，只需重绘
             }
             Invalidate();
         }
@@ -950,25 +656,15 @@ namespace HomeworkViewer
 
         private void UpdateSubjectsByMode()
         {
-            var subjectModes = new Dictionary<string, string[]>
-            {
-                {"大理", new[]{"语文","数学","英语","物理","化学","生物"}},
-                {"中理", new[]{"语文","数学","英语","物理","化学","地理"}},
-                {"小理", new[]{"语文","数学","英语","物理","化学","政治"}},
-                {"大文", new[]{"语文","数学","英语","政治","历史","地理"}},
-                {"全科", new[]{"语文","数学","英语","物理","化学","生物","政治","历史","地理"}}
-            };
-            currentSubjects = subjectModes.ContainsKey(appConfig.LastMode) ? subjectModes[appConfig.LastMode] : subjectModes["大理"];
+            currentSubjects = appConfig.CustomSubjects.ToArray();
             CalculateGridRects();
         }
 
         private void CalculateGridRects()
         {
             gridRects.Clear();
-            int subjectCount = currentSubjects.Length;
             int cols = 3;
-            int rows = (subjectCount + cols - 1) / cols;
-
+            int rows = 2;
             float areaWidth = GRID_AREA.Width;
             float areaHeight = GRID_AREA.Height;
 
@@ -978,40 +674,85 @@ namespace HomeworkViewer
             for (int row = 0; row < rows; row++)
                 for (int col = 0; col < cols; col++)
                 {
-                    int index = row * cols + col;
-                    if (index >= subjectCount) break;
                     int x = GRID_AREA.Left + GRID_PADDING + col * (int)(rectWidth + GRID_PADDING);
                     int y = GRID_AREA.Top + GRID_PADDING + row * (int)(rectHeight + GRID_PADDING);
                     gridRects.Add(new Rectangle(x, y, (int)rectWidth, (int)rectHeight));
                 }
-            _cardAnimations.Clear();
         }
 
         private void LoadHomeworkData(DateTime date)
         {
+            DateTime effectiveDate = (historyMode && historyDate.HasValue) ? date : GetEffectiveDate(date);
+            HomeworkData loadedData = null;
             if (appConfig.MgmtEnabled && appConfig.MgmtForceRemote)
             {
-                var remoteData = ManagementHelper.LoadHomeworkDataFromRemote(date);
-                if (remoteData != null)
+                loadedData = ManagementHelper.LoadHomeworkDataFromRemote(effectiveDate);
+                if (loadedData != null)
                 {
-                    homeworkData = remoteData;
+                    CheckAndPromptMissingSubjects(loadedData);
+                    homeworkData = loadedData;
                     if (EditMode) CreateTimeComboBoxes();
-                    if (_useWebView2) RefreshAllWebView2Content();
-                    else Invalidate(); // GDI+ 模式重绘
                     return;
                 }
             }
 
-            homeworkData = HomeworkData.Load(date);
-            if (homeworkData.DueTimes.Count == 0)
+            loadedData = HomeworkData.Load(effectiveDate);
+            CheckAndPromptMissingSubjects(loadedData);
+            homeworkData = loadedData;
+            foreach (string subject in appConfig.CustomSubjects)
             {
-                foreach (string subject in currentSubjects)
+                if (!homeworkData.Subjects.ContainsKey(subject))
+                    homeworkData.Subjects[subject] = "";
+                if (!homeworkData.DueTimes.ContainsKey(subject))
                     homeworkData.DueTimes[subject] = appConfig.EveningClassCount >= 3 ? "晚修3" : "无";
-                SaveHomeworkData();
             }
             if (EditMode) CreateTimeComboBoxes();
-            if (_useWebView2) RefreshAllWebView2Content();
-            else Invalidate();
+        }
+
+        private void CheckAndPromptMissingSubjects(HomeworkData loadedData)
+        {
+            if (loadedData == null) return;
+            var missingSubjects = new List<string>();
+            foreach (var subject in loadedData.Subjects.Keys)
+            {
+                if (!appConfig.CustomSubjects.Contains(subject))
+                    missingSubjects.Add(subject);
+            }
+            if (missingSubjects.Count > 0)
+            {
+                string subjectList = string.Join("、", missingSubjects);
+                DialogResult result = MessageBox.Show(
+                    $"当前状态下加载该作业存在缺少的科目：{subjectList}\n是否添加这些卡片？",
+                    "缺失科目",
+                    MessageBoxButtons.YesNo,
+                    MessageBoxIcon.Question);
+                if (result == DialogResult.Yes)
+                {
+                    foreach (var sub in missingSubjects)
+                    {
+                        if (!appConfig.CustomSubjects.Contains(sub))
+                        {
+                            appConfig.CustomSubjects.Add(sub);
+                            if (!homeworkData.Subjects.ContainsKey(sub))
+                                homeworkData.Subjects[sub] = loadedData.Subjects.ContainsKey(sub) ? loadedData.Subjects[sub] : "";
+                            if (!homeworkData.DueTimes.ContainsKey(sub))
+                                homeworkData.DueTimes[sub] = loadedData.DueTimes.ContainsKey(sub) ? loadedData.DueTimes[sub] : "无";
+                        }
+                    }
+                    appConfig.Save();
+                    SaveHomeworkData();
+                    UpdateSubjectsByMode();
+                    Invalidate();
+                }
+                else
+                {
+                    foreach (var sub in missingSubjects)
+                    {
+                        loadedData.Subjects.Remove(sub);
+                        loadedData.DueTimes.Remove(sub);
+                    }
+                }
+            }
         }
 
         private void SaveHomeworkData()
@@ -1022,9 +763,8 @@ namespace HomeworkViewer
                 return;
             }
             DateTime saveDate = historyMode && historyDate.HasValue ? historyDate.Value : currentDate;
-            homeworkData.Save(saveDate);
-            if (_useWebView2) RefreshAllWebView2Content();
-            else Invalidate();
+            DateTime effectiveSaveDate = (historyMode && historyDate.HasValue) ? saveDate : GetEffectiveDate(saveDate);
+            homeworkData.Save(effectiveSaveDate);
         }
 
         private void ToggleFullscreen()
@@ -1042,7 +782,6 @@ namespace HomeworkViewer
                 ClientSize = VIRTUAL_SIZE;
             }
             UpdateScale();
-            if (_useWebView2) UpdateWebView2Positions();
             Invalidate();
         }
 
@@ -1060,17 +799,537 @@ namespace HomeworkViewer
         private Point MapToVirtual(Point screenPt) => new Point((int)((screenPt.X - offset.X) / scaleFactor), (int)((screenPt.Y - offset.Y) / scaleFactor));
         private Point MapToScreen(Point virtualPt) => new Point((int)(virtualPt.X * scaleFactor + offset.X), (int)(virtualPt.Y * scaleFactor + offset.Y));
 
-        private Rectangle GetContentArea(int subjectIndex)
+        // ------------------------------ 自动轮播与卡片管理模式 ------------------------------
+        private void InitAutoPageTimer()
         {
-            if (rotationMode)
+            _autoPageInterval = appConfig.AutoPageInterval;
+            _autoPageTimer = new Timer { Interval = _autoPageInterval * 1000 };
+            _autoPageTimer.Tick += (s, e) =>
             {
-                var bigRect = new Rectangle(150, 100, 900, 475);
-                return new Rectangle(bigRect.Left + 50, bigRect.Top + 150, bigRect.Width - 100, bigRect.Height - 200);
+                // 卡片管理模式、轮播模式或编辑模式下禁止自动翻页
+                if (!_isCardEditingMode && !rotationMode && !editMode && TotalPages > 1)
+                {
+                    int nextPage = (_currentPage + 1) % TotalPages;
+                    SwitchToPage(nextPage, -1);
+                }
+            };
+            _autoPageTimer.Start();
+        }
+
+        private void ResetAutoPageTimer()
+        {
+            if (_autoPageTimer != null)
+            {
+                _autoPageTimer.Stop();
+                _autoPageTimer.Start();
             }
-            if (subjectIndex < 0 || subjectIndex >= gridRects.Count) return Rectangle.Empty;
-            Rectangle rect = gridRects[subjectIndex];
-            int topOffset = (appConfig.LastMode == "全科") ? 40 : 50;
-            return new Rectangle(rect.Left + 10, rect.Top + topOffset + 10, rect.Width - 20, rect.Height - (topOffset + 20));
+        }
+
+        private void SwitchToPage(int newPage, int direction)
+        {
+            if (newPage == _currentPage) return;
+            ResetAutoPageTimer();
+
+            // 编辑模式下先销毁下拉框，避免动画期间残留
+            if (EditMode)
+            {
+                DestroyTimeComboBoxes();
+            }
+
+            FlyOutCurrentPage(() =>
+            {
+                _currentPage = newPage;
+                scrollOffsets.Clear();
+                scrollPaused.Clear();
+                pauseStartTime.Clear();
+                StartCardFlyInAnimation(-direction);
+            }, direction);
+        }
+
+        private void FlyOutCurrentPage(Action onComplete, int direction)
+        {
+            _cardAnimations.Clear();
+            _flyOutProgress.Clear();
+            int cols = 3;
+            double duration = 0.3;
+            double totalDelay = 0.1;
+            double colDelay = 0.05;
+            double rowDelay = 0.03;
+            int remaining = 0;
+            float screenWidth = VIRTUAL_SIZE.Width;
+            float outOffset = direction == 1 ? screenWidth : -screenWidth;
+
+            for (int i = 0; i < appConfig.CustomSubjects.Count; i++)
+            {
+                int row = i / cols;
+                if (row / 2 != _currentPage) continue;
+                int col = i % cols;
+                double delay = totalDelay + col * colDelay + (row % 2) * rowDelay;
+
+                remaining++;
+                int index = i;
+                var anim = new Animation
+                {
+                    Duration = TimeSpan.FromSeconds(duration),
+                    StartDelay = TimeSpan.FromSeconds(delay),
+                    Tag = index
+                };
+                anim.OnUpdate = (p) =>
+                {
+                    float offset = outOffset * (float)p;
+                    _flyOutProgress[index] = offset;
+                    Invalidate(GetPageCardRect(index));
+                };
+                anim.OnComplete = () =>
+                {
+                    remaining--;
+                    if (remaining == 0 && _virtualCardFlyOutAnim == null)
+                        onComplete?.Invoke();
+                };
+                anim.Start();
+                _animations.Add(anim);
+            }
+
+            int visibleCount = Math.Min(CARDS_PER_PAGE, appConfig.CustomSubjects.Count - _currentPage * CARDS_PER_PAGE);
+            if (visibleCount < CARDS_PER_PAGE)
+            {
+                int emptyLocalIndex = visibleCount;
+                int row = emptyLocalIndex / 3;
+                int col = emptyLocalIndex % 3;
+                double delay = totalDelay + col * colDelay + row * rowDelay;
+                _virtualCardFlyOutOffset = 0;
+                if (_virtualCardFlyOutAnim != null) _animations.Remove(_virtualCardFlyOutAnim);
+                _virtualCardFlyOutAnim = new Animation
+                {
+                    Duration = TimeSpan.FromSeconds(duration),
+                    StartDelay = TimeSpan.FromSeconds(delay),
+                    Tag = "virtualOut"
+                };
+                _virtualCardFlyOutAnim.OnUpdate = (p) =>
+                {
+                    _virtualCardFlyOutOffset = outOffset * (float)p;
+                    Invalidate();
+                };
+                _virtualCardFlyOutAnim.OnComplete = () =>
+                {
+                    _virtualCardFlyOutOffset = 0;
+                    _virtualCardFlyOutAnim = null;
+                    if (remaining == 0)
+                        onComplete?.Invoke();
+                };
+                _virtualCardFlyOutAnim.Start();
+                _animations.Add(_virtualCardFlyOutAnim);
+            }
+
+            if (remaining == 0 && _virtualCardFlyOutAnim == null)
+                onComplete?.Invoke();
+        }
+
+        private void StartCardFlyInAnimation(int direction)
+        {
+            _isFlyingIn = true;
+            _cardAnimations.Clear();
+            _flyInOffsets.Clear();
+            _flyInAnimationsRemaining = 0;
+
+            int cols = 3;
+            double totalDelay = 0.3;
+            double colDelay = 0.08;
+            double rowDelay = 0.05;
+            double duration = 0.4;
+            float screenWidth = VIRTUAL_SIZE.Width;
+            float startOffset = direction == 1 ? screenWidth : -screenWidth;
+            _lastFlyDirection = direction;
+
+            // 预先设置真实卡片初始偏移
+            for (int i = 0; i < appConfig.CustomSubjects.Count; i++)
+            {
+                int row = i / cols;
+                if (row / 2 != _currentPage) continue;
+                _flyInOffsets[i] = startOffset;
+            }
+
+            // 飞入真实卡片
+            for (int i = 0; i < appConfig.CustomSubjects.Count; i++)
+            {
+                int row = i / cols;
+                if (row / 2 != _currentPage) continue;
+                int col = i % cols;
+                double delay = totalDelay + col * colDelay + (row % 2) * rowDelay;
+
+                var anim = new Animation
+                {
+                    Duration = TimeSpan.FromSeconds(duration),
+                    StartDelay = TimeSpan.FromSeconds(delay),
+                    Tag = i
+                };
+                int index = i;
+                anim.OnUpdate = (p) =>
+                {
+                    double t = 1 - Math.Pow(1 - p, 2);
+                    float offset = startOffset * (float)(1 - t);
+                    _flyInOffsets[index] = offset;
+                    Invalidate(GetPageCardRect(index));
+                };
+                anim.OnComplete = () =>
+                {
+                    _flyInAnimationsRemaining--;
+                    if (_flyInAnimationsRemaining == 0 && _virtualCardAnim == null)
+                    {
+                        _isFlyingIn = false;
+                        _cardAnimations.Clear();
+                        _flyInOffsets.Clear();
+                        // 飞入动画全部完成，若为编辑模式则重新创建下拉框
+                        if (EditMode)
+                        {
+                            CreateTimeComboBoxes();
+                        }
+                        Invalidate();
+                    }
+                };
+                anim.Start();
+                _cardAnimations[index] = anim;
+                _animations.Add(anim);
+                _flyInAnimationsRemaining++;
+            }
+
+            // 飞入虚线卡片
+            int visibleCount = Math.Min(CARDS_PER_PAGE, appConfig.CustomSubjects.Count - _currentPage * CARDS_PER_PAGE);
+            if (visibleCount < CARDS_PER_PAGE)
+            {
+                int emptyLocalIndex = visibleCount;
+                int row = emptyLocalIndex / 3;
+                int col = emptyLocalIndex % 3;
+                double delay = totalDelay + col * colDelay + row * rowDelay;
+                _virtualCardOffset = startOffset;
+                if (_virtualCardAnim != null) _animations.Remove(_virtualCardAnim);
+                _virtualCardAnim = new Animation
+                {
+                    Duration = TimeSpan.FromSeconds(duration),
+                    StartDelay = TimeSpan.FromSeconds(delay),
+                    Tag = "virtualIn"
+                };
+                _virtualCardAnim.OnUpdate = (p) =>
+                {
+                    double t = 1 - Math.Pow(1 - p, 2);
+                    _virtualCardOffset = startOffset * (float)(1 - t);
+                    Invalidate();
+                };
+                _virtualCardAnim.OnComplete = () =>
+                {
+                    _virtualCardOffset = 0;
+                    _virtualCardAnim = null;
+                    if (_flyInAnimationsRemaining == 0)
+                    {
+                        _isFlyingIn = false;
+                        // 虚线卡片动画完成，若为编辑模式且没有真实卡片动画，也要创建下拉框
+                        if (EditMode)
+                        {
+                            CreateTimeComboBoxes();
+                        }
+                        Invalidate();
+                    }
+                };
+                _virtualCardAnim.Start();
+                _animations.Add(_virtualCardAnim);
+            }
+
+            if (_flyInAnimationsRemaining == 0 && _virtualCardAnim == null)
+            {
+                _isFlyingIn = false;
+                // 没有任何动画时（例如当前页无卡片），直接创建下拉框
+                if (EditMode)
+                {
+                    CreateTimeComboBoxes();
+                }
+            }
+        }
+
+        private void RotateNext() => RotateManual(1);
+
+        private void RotateManual(int direction)
+        {
+            var nonEmpty = new List<int>();
+            for (int i = 0; i < appConfig.CustomSubjects.Count; i++)
+                if (homeworkData.Subjects.ContainsKey(appConfig.CustomSubjects[i]) && !string.IsNullOrWhiteSpace(homeworkData.Subjects[appConfig.CustomSubjects[i]]))
+                    nonEmpty.Add(i);
+            if (nonEmpty.Count == 0)
+            {
+                rotationMode = false;
+                rotationTimer.Stop();
+                StartCardFlyInAnimation(1);
+                MessageBox.Show("所有科目都没有作业内容，已退出轮播模式", "提示");
+                return;
+            }
+
+            int curIdx = nonEmpty.IndexOf(rotationIndex);
+            if (curIdx < 0) curIdx = 0;
+            int newIdx = (curIdx + direction + nonEmpty.Count) % nonEmpty.Count;
+            int newIndex = nonEmpty[newIdx];
+
+            if (newIndex == rotationIndex) return;
+
+            _oldSlideIndex = rotationIndex;
+            _newSlideIndex = newIndex;
+            _oldSlideContent = homeworkData.Subjects.ContainsKey(appConfig.CustomSubjects[_oldSlideIndex]) ? homeworkData.Subjects[appConfig.CustomSubjects[_oldSlideIndex]] : "";
+            _newSlideContent = homeworkData.Subjects.ContainsKey(appConfig.CustomSubjects[_newSlideIndex]) ? homeworkData.Subjects[appConfig.CustomSubjects[_newSlideIndex]] : "";
+            _slideProgress = 0;
+            _isSliding = true;
+            _slidePhase = 0;
+
+            var slideAnim = new Animation
+            {
+                Duration = TimeSpan.FromMilliseconds(300),
+                IsLooping = false,
+                Tag = "slide"
+            };
+            slideAnim.OnUpdate = (p) =>
+            {
+                _slideProgress = (float)p;
+                Invalidate();
+            };
+            slideAnim.OnComplete = () =>
+            {
+                if (_slidePhase == 0)
+                {
+                    _slidePhase = 1;
+                    _slideProgress = 0;
+                    var newAnim = new Animation
+                    {
+                        Duration = TimeSpan.FromMilliseconds(300),
+                        IsLooping = false,
+                        Tag = "slide"
+                    };
+                    newAnim.OnUpdate = (p) =>
+                    {
+                        _slideProgress = (float)p;
+                        Invalidate();
+                    };
+                    newAnim.OnComplete = () =>
+                    {
+                        _isSliding = false;
+                        rotationIndex = _newSlideIndex;
+                        Invalidate();
+                    };
+                    newAnim.Start();
+                    _animations.Add(newAnim);
+                }
+                else
+                {
+                    _isSliding = false;
+                    rotationIndex = _newSlideIndex;
+                    Invalidate();
+                }
+            };
+            slideAnim.Start();
+            _animations.Add(slideAnim);
+        }
+
+        private void EnterCardEditMode()
+        {
+            _isCardEditingMode = true;
+            _autoPageTimer.Stop();
+            StartShakeAnimation();
+
+            // 检查最后一页是否已满
+            int realTotalPages = (int)Math.Ceiling(appConfig.CustomSubjects.Count / (double)CARDS_PER_PAGE);
+            if (realTotalPages > 0 && appConfig.CustomSubjects.Count % CARDS_PER_PAGE == 0)
+            {
+                _showVirtualAddCardPage = true;
+                // 如果当前页是最后一页，切换到虚拟页
+                if (_currentPage == realTotalPages - 1)
+                    _currentPage = realTotalPages; // 切换到虚拟页（索引 realTotalPages）
+            }
+            else
+            {
+                _showVirtualAddCardPage = false;
+            }
+
+            Invalidate();
+        }
+
+        private void ExitCardEditMode()
+        {
+            _isCardEditingMode = false;
+            _autoPageTimer.Start();
+            StopShakeAnimation();
+            _showVirtualAddCardPage = false;
+
+            // 如果当前页是虚拟页，跳回真实最后一页
+            int realTotalPages = (int)Math.Ceiling(appConfig.CustomSubjects.Count / (double)CARDS_PER_PAGE);
+            if (_currentPage >= realTotalPages)
+                _currentPage = realTotalPages - 1;
+            if (_currentPage < 0) _currentPage = 0;
+
+            _virtualCardOffset = 0;
+            if (_virtualCardAnim != null)
+            {
+                _animations.Remove(_virtualCardAnim);
+                _virtualCardAnim = null;
+            }
+            Invalidate();
+        }
+
+        private void StartShakeAnimation()
+        {
+            if (_shakeTimer == null)
+            {
+                _shakeTimer = new Timer { Interval = 70 };
+                _shakeTimer.Tick += (s, e) =>
+                {
+                    _shakeAngle += _shakeDirection ? _shakeStep : -_shakeStep;
+                    if (_shakeAngle > _shakeMaxAngle) { _shakeAngle = _shakeMaxAngle; _shakeDirection = false; }
+                    else if (_shakeAngle < -_shakeMaxAngle) { _shakeAngle = -_shakeMaxAngle; _shakeDirection = true; }
+                    Invalidate();
+                };
+            }
+            _shakeTimer.Start();
+        }
+
+        private void StopShakeAnimation()
+        {
+            _shakeTimer?.Stop();
+            _shakeAngle = 0;
+        }
+
+        private void AddNewCard()
+        {
+            string baseName = "科目";
+            string newName = baseName;
+            int counter = 1;
+            while (appConfig.CustomSubjects.Contains(newName))
+            {
+                counter++;
+                newName = $"{baseName}{counter}";
+            }
+
+            string inputName = Microsoft.VisualBasic.Interaction.InputBox("请输入科目名称：", "添加卡片", newName);
+            if (string.IsNullOrWhiteSpace(inputName)) return;
+
+            if (appConfig.CustomSubjects.Contains(inputName))
+            {
+                MessageBox.Show("科目已存在！", "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            int newIndex = appConfig.CustomSubjects.Count;
+            appConfig.CustomSubjects.Add(inputName);
+            if (!homeworkData.Subjects.ContainsKey(inputName))
+                homeworkData.Subjects[inputName] = "";
+            if (!homeworkData.DueTimes.ContainsKey(inputName))
+                homeworkData.DueTimes[inputName] = "无";
+            SaveHomeworkData();
+            appConfig.Save();
+            UpdateSubjectsByMode();
+
+            // 清除虚拟页标志（如果存在）
+            if (_showVirtualAddCardPage)
+            {
+                _showVirtualAddCardPage = false;
+            }
+
+            // 计算新卡片所在页码
+            int targetPage = newIndex / CARDS_PER_PAGE;
+            if (_currentPage != targetPage)
+            {
+                _currentPage = targetPage;
+                StartCardFlyInAnimation(1);
+            }
+            else
+            {
+                // 为新增卡片创建淡入动画
+                var fadeAnim = new Animation
+                {
+                    Duration = TimeSpan.FromMilliseconds(300),
+                    Tag = newIndex
+                };
+                fadeAnim.OnUpdate = (p) =>
+                {
+                    _fadeInProgress[newIndex] = (float)p;
+                    Invalidate(GetPageCardRect(newIndex));
+                };
+                fadeAnim.OnComplete = () =>
+                {
+                    _fadeInProgress.Remove(newIndex);
+                    Invalidate();
+                };
+                fadeAnim.Start();
+                _animations.Add(fadeAnim);
+                Invalidate();
+            }
+        }
+
+        private void DeleteCard(int index)
+        {
+            string subject = appConfig.CustomSubjects[index];
+            DialogResult result = MessageBox.Show($"确定要删除卡片“{subject}”吗？", "确认删除", MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
+            if (result == DialogResult.Yes)
+            {
+                appConfig.CustomSubjects.RemoveAt(index);
+                homeworkData.Subjects.Remove(subject);
+                homeworkData.DueTimes.Remove(subject);
+                SaveHomeworkData();
+                appConfig.Save();
+                UpdateSubjectsByMode();
+
+                // 删除后检查当前页是否为空（无卡片）
+                int cardsOnCurrentPage = appConfig.CustomSubjects.Count - _currentPage * CARDS_PER_PAGE;
+                if (cardsOnCurrentPage <= 0 && _currentPage > 0)
+                {
+                    _currentPage--;
+                }
+
+                // 如果当前页还有卡片，但页面总数减少导致当前页超出范围，也修正
+                int newTotalPages = (int)Math.Ceiling(appConfig.CustomSubjects.Count / (double)CARDS_PER_PAGE);
+                if (_currentPage >= newTotalPages && newTotalPages > 0)
+                {
+                    _currentPage = newTotalPages - 1;
+                }
+                if (_currentPage < 0) _currentPage = 0;
+
+                Invalidate();
+            }
+        }
+
+        private void RenameCard(int index, string newName)
+        {
+            string oldName = appConfig.CustomSubjects[index];
+            if (oldName == newName) return;
+            if (appConfig.CustomSubjects.Contains(newName))
+            {
+                MessageBox.Show("科目已存在！", "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+            appConfig.CustomSubjects[index] = newName;
+            if (homeworkData.Subjects.ContainsKey(oldName))
+            {
+                string content = homeworkData.Subjects[oldName];
+                homeworkData.Subjects.Remove(oldName);
+                homeworkData.Subjects[newName] = content;
+            }
+            if (homeworkData.DueTimes.ContainsKey(oldName))
+            {
+                string due = homeworkData.DueTimes[oldName];
+                homeworkData.DueTimes.Remove(oldName);
+                homeworkData.DueTimes[newName] = due;
+            }
+            SaveHomeworkData();
+            appConfig.Save();
+            UpdateSubjectsByMode();
+            Invalidate();
+        }
+
+        private void SwapCards(int indexA, int indexB)
+        {
+            if (indexA == indexB) return;
+            if (indexA < 0 || indexA >= appConfig.CustomSubjects.Count || indexB < 0 || indexB >= appConfig.CustomSubjects.Count)
+                return;
+            var temp = appConfig.CustomSubjects[indexA];
+            appConfig.CustomSubjects[indexA] = appConfig.CustomSubjects[indexB];
+            appConfig.CustomSubjects[indexB] = temp;
+            appConfig.Save();
+            UpdateSubjectsByMode();
+            Invalidate();
         }
 
         // ------------------------------ 下拉栏方法 ------------------------------
@@ -1088,7 +1347,7 @@ namespace HomeworkViewer
             {
                 Point screenPt = _drawerPanel.PointToScreen(e.Location);
                 Point formPt = this.PointToClient(screenPt);
-                OnMouseMove(new MouseEventArgs(e.Button, e.Clicks, formPt.X, formPt.Y, e.Delta));
+                OnMouseMove(this, new MouseEventArgs(e.Button, e.Clicks, formPt.X, formPt.Y, e.Delta));
             };
             this.Controls.Add(_drawerPanel);
             this.Controls.SetChildIndex(_drawerPanel, 0);
@@ -1118,7 +1377,6 @@ namespace HomeworkViewer
         {
             if (_drawerOpen) return;
             _drawerOpen = true;
-            _suspendMouseGlow = true;
             int targetHeight = this.ClientSize.Height / MAX_DRAWER_HEIGHT_RATIO;
             SetDrawerHeight(targetHeight);
         }
@@ -1127,7 +1385,6 @@ namespace HomeworkViewer
         {
             if (!_drawerOpen) return;
             _drawerOpen = false;
-            _suspendMouseGlow = false;
             AnimateDrawerClose();
         }
 
@@ -1169,13 +1426,13 @@ namespace HomeworkViewer
 
         private void OnMouseDown(object sender, MouseEventArgs e)
         {
-            if (_isFlyingIn || _inRipple) return;
+            if (_isFlyingIn) return;
 
             Point v = MapToVirtual(e.Location);
             int x = v.X, y = v.Y;
 
             foreach (var key in _buttonPressed.Keys.ToList()) _buttonPressed[key] = false;
-            _settingsPressed = _rotatePressed = _editPressed = _historyPressed = _fullscreenPressed = _backPressed = _minimizePressed = _closePressed = _expandPressed = _collapsePressed = _exportPressed = false;
+            _settingsPressed = _rotatePressed = _editPressed = _historyPressed = _fullscreenPressed = _backPressed = _minimizePressed = _closePressed = _expandPressed = _collapsePressed = _exportPressed = _managePressed = _addCardPressed = false;
 
             if (rotationMode)
             {
@@ -1191,24 +1448,83 @@ namespace HomeworkViewer
                 {
                     if (expandBtnRect.Contains(x, y)) { _expandPressed = true; _buttonPressed["expand"] = true; }
                     else if (editBtnRect.Contains(x, y)) { _editPressed = true; _buttonPressed["edit"] = true; }
-                    else
-                    {
-                        bool isWin10 = Environment.OSVersion.Version.Major == 10 && Environment.OSVersion.Version.Minor == 0 && Environment.OSVersion.Version.Build < 22000;
-                        if (isWin10 && minimizeBtnRect.Contains(x, y)) { _minimizePressed = true; _buttonPressed["minimize"] = true; }
-                        else if (fullscreenBtnRect.Contains(x, y)) { _fullscreenPressed = true; _buttonPressed["fullscreen"] = true; }
-                    }
+                    else if (fullscreenBtnRect.Contains(x, y)) { _fullscreenPressed = true; _buttonPressed["fullscreen"] = true; }
+                    else if (minimizeBtnRect.Contains(x, y)) { _minimizePressed = true; _buttonPressed["minimize"] = true; }
                 }
                 else
                 {
-                    if (collapseBtnRect.Contains(x, y)) { _collapsePressed = true; _buttonPressed["collapse"] = true; }
-                    else if (settingsBtnRect.Contains(x, y)) { _settingsPressed = true; _buttonPressed["settings"] = true; }
-                    else if (rotateBtnRect.Contains(x, y)) { _rotatePressed = true; _buttonPressed["rotate"] = true; }
-                    else if (exportBtnRect.Contains(x, y)) { _exportPressed = true; _buttonPressed["export"] = true; }
-                    else if (editBtnRect.Contains(x, y)) { _editPressed = true; _buttonPressed["edit"] = true; }
-                    else if (historyBtnRect.Contains(x, y)) { _historyPressed = true; _buttonPressed["history"] = true; }
-                    else if (fullscreenBtnRect.Contains(x, y)) { _fullscreenPressed = true; _buttonPressed["fullscreen"] = true; }
-                    else if (minimizeBtnRect.Contains(x, y)) { _minimizePressed = true; _buttonPressed["minimize"] = true; }
-                    else if (closeBtnRect.Contains(x, y)) { _closePressed = true; _buttonPressed["close"] = true; }
+                    if (_isCardEditingMode)
+                    {
+                        if (manageBtnRect.Contains(x, y)) { _managePressed = true; _buttonPressed["manage"] = true; }
+                        else if (addCardBtnRect.Contains(x, y)) { _addCardPressed = true; _buttonPressed["addCard"] = true; }
+                    }
+                    else
+                    {
+                        if (collapseBtnRect.Contains(x, y)) { _collapsePressed = true; _buttonPressed["collapse"] = true; }
+                        else if (settingsBtnRect.Contains(x, y)) { _settingsPressed = true; _buttonPressed["settings"] = true; }
+                        else if (rotateBtnRect.Contains(x, y)) { _rotatePressed = true; _buttonPressed["rotate"] = true; }
+                        else if (manageBtnRect.Contains(x, y)) { _managePressed = true; _buttonPressed["manage"] = true; }
+                        else if (exportBtnRect.Contains(x, y)) { _exportPressed = true; _buttonPressed["export"] = true; }
+                        else if (editBtnRect.Contains(x, y)) { _editPressed = true; _buttonPressed["edit"] = true; }
+                        else if (historyBtnRect.Contains(x, y)) { _historyPressed = true; _buttonPressed["history"] = true; }
+                        else if (fullscreenBtnRect.Contains(x, y)) { _fullscreenPressed = true; _buttonPressed["fullscreen"] = true; }
+                        else if (minimizeBtnRect.Contains(x, y)) { _minimizePressed = true; _buttonPressed["minimize"] = true; }
+                        else if (closeBtnRect.Contains(x, y)) { _closePressed = true; _buttonPressed["close"] = true; }
+                    }
+                }
+            }
+
+            if (_isCardEditingMode && !rotationMode)
+            {
+                bool hitDelete = false;
+                foreach (var delRect in _deleteButtonRects)
+                {
+                    if (delRect.Contains(x, y)) { hitDelete = true; break; }
+                }
+                bool hitArrow = (TotalPages > 1 && (leftArrowRect.Contains(x, y) || rightArrowRect.Contains(x, y)));
+                if (!hitDelete && !hitArrow)
+                {
+                    List<Rectangle> pageRects = GetPageGridRects();
+                    int startIndex = _currentPage * CARDS_PER_PAGE;
+                    for (int i = 0; i < pageRects.Count; i++)
+                    {
+                        int cardIndex = startIndex + i;
+                        if (cardIndex >= appConfig.CustomSubjects.Count) break;
+                        if (pageRects[i].Contains(x, y))
+                        {
+                            _isDragging = true;
+                            _dragStartIndex = cardIndex;
+                            _dragStartPoint = new Point(x, y);
+                            _dragOverIndex = cardIndex;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            if (!rotationMode && !editMode && !_isCardEditingMode)
+            {
+                for (int i = 0; i < gridRects.Count; i++)
+                {
+                    var rect = gridRects[i];
+                    int col = i % 3;
+                    int row = i / 3;
+                    if (Math.Abs(x - rect.Right) < 5 && col < 2)
+                    {
+                        _isResizing = true;
+                        _resizeTargetCol = col;
+                        _resizeStartX = x;
+                        _originalWidth = rect.Width;
+                        break;
+                    }
+                    if (Math.Abs(y - rect.Bottom) < 5 && row < 1)
+                    {
+                        _isResizing = true;
+                        _resizeTargetRow = row;
+                        _resizeStartY = y;
+                        _originalHeight = rect.Height;
+                        break;
+                    }
                 }
             }
 
@@ -1217,58 +1533,33 @@ namespace HomeworkViewer
 
         private void OnMouseMove(object sender, MouseEventArgs e)
         {
-            if (_isFlyingIn || _inRipple) return;
-            if (_suspendMouseGlow) return;
+            if (_isFlyingIn) return;
+            Point v = MapToVirtual(e.Location);
+            int x = v.X, y = v.Y;
 
-            if (!_isWin10)
+            if (_isDragging && _isCardEditingMode && !rotationMode)
             {
-                if (!_mouseInside)
+                List<Rectangle> pageRects = GetPageGridRects();
+                int startIndex = _currentPage * CARDS_PER_PAGE;
+                int newOver = -1;
+                for (int i = 0; i < pageRects.Count; i++)
                 {
-                    _mouseInside = true;
-                    if (_mouseGlowFadeOutAnimation != null && _mouseGlowFadeOutAnimation.IsRunning)
+                    int cardIndex = startIndex + i;
+                    if (cardIndex >= appConfig.CustomSubjects.Count) break;
+                    if (pageRects[i].Contains(x, y))
                     {
-                        _animations.Remove(_mouseGlowFadeOutAnimation);
-                        _mouseGlowFadeOutAnimation = null;
-                    }
-                    if (_mouseGlowAlpha <= 0.01f && _mouseGlowFadeAnimation == null)
-                    {
-                        var fadeIn = new Animation
-                        {
-                            Duration = TimeSpan.FromMilliseconds(500),
-                            Tag = "mouseGlowFadeIn"
-                        };
-                        fadeIn.OnUpdate = (p) =>
-                        {
-                            _mouseGlowAlpha = (float)p;
-                            Invalidate();
-                        };
-                        fadeIn.OnComplete = () =>
-                        {
-                            _mouseGlowAlpha = 1;
-                            _mouseGlowFadeAnimation = null;
-                            Invalidate();
-                        };
-                        fadeIn.Start();
-                        _animations.Add(fadeIn);
-                        _mouseGlowFadeAnimation = fadeIn;
+                        newOver = cardIndex;
+                        break;
                     }
                 }
-
-                _mouseVirtualPos = MapToVirtual(e.Location);
+                if (newOver != _dragOverIndex)
+                {
+                    _dragOverIndex = newOver;
+                    Invalidate();
+                }
             }
-            else
-            {
-                _mouseGlowAlpha = 0;
-                _mouseVirtualPos = MapToVirtual(e.Location);
-            }
-
-            Invalidate();
-
-            Point vBtn = _mouseVirtualPos;
-            int x = vBtn.X, y = vBtn.Y;
 
             string newHoverKey = null;
-
             if (rotationMode)
             {
                 if (backBtnRect.Contains(x, y)) newHoverKey = "back";
@@ -1284,44 +1575,87 @@ namespace HomeworkViewer
                     if (expandBtnRect.Contains(x, y)) newHoverKey = "expand";
                     else if (editBtnRect.Contains(x, y)) newHoverKey = "edit";
                     else if (fullscreenBtnRect.Contains(x, y)) newHoverKey = "fullscreen";
+                    else if (minimizeBtnRect.Contains(x, y)) newHoverKey = "minimize";
                 }
                 else
                 {
-                    if (collapseBtnRect.Contains(x, y)) newHoverKey = "collapse";
-                    else if (settingsBtnRect.Contains(x, y)) newHoverKey = "settings";
-                    else if (rotateBtnRect.Contains(x, y)) newHoverKey = "rotate";
-                    else if (exportBtnRect.Contains(x, y)) newHoverKey = "export";
-                    else if (editBtnRect.Contains(x, y)) newHoverKey = "edit";
-                    else if (historyBtnRect.Contains(x, y)) newHoverKey = "history";
-                    else if (fullscreenBtnRect.Contains(x, y)) newHoverKey = "fullscreen";
-                    else if (minimizeBtnRect.Contains(x, y)) newHoverKey = "minimize";
-                    else if (closeBtnRect.Contains(x, y)) newHoverKey = "close";
+                    if (_isCardEditingMode)
+                    {
+                        if (manageBtnRect.Contains(x, y)) newHoverKey = "manage";
+                        else if (addCardBtnRect.Contains(x, y)) newHoverKey = "addCard";
+                    }
+                    else
+                    {
+                        if (collapseBtnRect.Contains(x, y)) newHoverKey = "collapse";
+                        else if (settingsBtnRect.Contains(x, y)) newHoverKey = "settings";
+                        else if (rotateBtnRect.Contains(x, y)) newHoverKey = "rotate";
+                        else if (manageBtnRect.Contains(x, y)) newHoverKey = "manage";
+                        else if (exportBtnRect.Contains(x, y)) newHoverKey = "export";
+                        else if (editBtnRect.Contains(x, y)) newHoverKey = "edit";
+                        else if (historyBtnRect.Contains(x, y)) newHoverKey = "history";
+                        else if (fullscreenBtnRect.Contains(x, y)) newHoverKey = "fullscreen";
+                        else if (minimizeBtnRect.Contains(x, y)) newHoverKey = "minimize";
+                        else if (closeBtnRect.Contains(x, y)) newHoverKey = "close";
+                    }
                 }
             }
 
             if (newHoverKey == _currentHoverKey) return;
-
             if (_currentHoverKey != null)
                 StartButtonHoverAnimation(_currentHoverKey, false);
-
             if (newHoverKey != null)
             {
                 if (!_buttonHoverProgress.ContainsKey(newHoverKey))
                     _buttonHoverProgress[newHoverKey] = 0;
                 StartButtonHoverAnimation(newHoverKey, true);
             }
-
             _currentHoverKey = newHoverKey;
-
-            _hideMouseGlow = (inlineEditControl != null && inlineEditControl.Visible && inlineEditControl.Bounds.Contains(e.Location)) || _suspendMouseGlow;
         }
 
         private void OnMouseUp(object sender, MouseEventArgs e)
         {
-            if (_isFlyingIn || _inRipple) return;
+            if (_isFlyingIn) return;
+
+            if (_isResizing)
+            {
+                _isResizing = false;
+                if (_resizeTargetCol >= 0)
+                {
+                    int newWidth = _originalWidth + (e.X - _resizeStartX);
+                    if (newWidth >= 150 && newWidth <= 800)
+                        appConfig.ColumnWidth = newWidth;
+                    else
+                        appConfig.ColumnWidth = 0;
+                }
+                if (_resizeTargetRow >= 0)
+                {
+                    int newHeight = _originalHeight + (e.Y - _resizeStartY);
+                    if (newHeight >= 120 && newHeight <= 600)
+                        appConfig.RowHeight = newHeight;
+                    else
+                        appConfig.RowHeight = 0;
+                }
+                appConfig.Save();
+                CalculateGridRects();
+                Invalidate();
+                _resizeTargetCol = -1;
+                _resizeTargetRow = -1;
+            }
+
+            if (_isDragging && _isCardEditingMode && !rotationMode)
+            {
+                if (_dragOverIndex != -1 && _dragOverIndex != _dragStartIndex)
+                {
+                    SwapCards(_dragStartIndex, _dragOverIndex);
+                }
+                _isDragging = false;
+                _dragStartIndex = -1;
+                _dragOverIndex = -1;
+                Invalidate();
+            }
 
             foreach (var key in _buttonPressed.Keys.ToList()) _buttonPressed[key] = false;
-            _settingsPressed = _rotatePressed = _editPressed = _historyPressed = _fullscreenPressed = _backPressed = _minimizePressed = _closePressed = _expandPressed = _collapsePressed = _exportPressed = false;
+            _settingsPressed = _rotatePressed = _editPressed = _historyPressed = _fullscreenPressed = _backPressed = _minimizePressed = _closePressed = _expandPressed = _collapsePressed = _exportPressed = _managePressed = _addCardPressed = false;
             Invalidate();
         }
 
@@ -1336,40 +1670,6 @@ namespace HomeworkViewer
             }
             foreach (var key in _buttonPressed.Keys.ToList())
                 _buttonPressed[key] = false;
-
-            if (!_isWin10)
-            {
-                _mouseInside = false;
-                if (_mouseGlowFadeAnimation != null && _mouseGlowFadeAnimation.IsRunning)
-                    _animations.Remove(_mouseGlowFadeAnimation);
-                if (_mouseGlowFadeOutAnimation != null && _mouseGlowFadeOutAnimation.IsRunning)
-                    _animations.Remove(_mouseGlowFadeOutAnimation);
-
-                float startAlpha = _mouseGlowAlpha;
-                _mouseGlowFadeOutAnimation = new Animation
-                {
-                    Duration = TimeSpan.FromMilliseconds(500),
-                    Tag = "mouseGlowFadeOut"
-                };
-                _mouseGlowFadeOutAnimation.OnUpdate = (p) =>
-                {
-                    _mouseGlowAlpha = startAlpha * (1 - (float)p);
-                    Invalidate();
-                };
-                _mouseGlowFadeOutAnimation.OnComplete = () =>
-                {
-                    _mouseGlowAlpha = 0;
-                    _mouseGlowFadeOutAnimation = null;
-                    Invalidate();
-                };
-                _mouseGlowFadeOutAnimation.Start();
-                _animations.Add(_mouseGlowFadeOutAnimation);
-            }
-            else
-            {
-                _mouseGlowAlpha = 0;
-            }
-
             Invalidate();
         }
 
@@ -1452,8 +1752,9 @@ namespace HomeworkViewer
 
         private Rectangle GetDueTimeRect(int subjectIndex)
         {
-            Rectangle rect = gridRects[subjectIndex];
-            string subject = currentSubjects[subjectIndex];
+            Rectangle rect = GetPageCardRect(subjectIndex);
+            if (rect.IsEmpty) return Rectangle.Empty;
+            string subject = appConfig.CustomSubjects[subjectIndex];
             string dueTime = homeworkData.DueTimes.ContainsKey(subject) ? homeworkData.DueTimes[subject] : "";
             string prefix = "提交时间：";
             string displayTime = string.IsNullOrEmpty(dueTime) ? "无" : dueTime;
@@ -1477,363 +1778,28 @@ namespace HomeworkViewer
             return new Rectangle((int)startX, minY, (int)totalWidth + 5, height);
         }
 
-        // ------------------------------ 模式切换下拉框 ------------------------------
+        private Rectangle GetPageCardRect(int globalIndex)
+        {
+            int page = globalIndex / CARDS_PER_PAGE;
+            int idx = globalIndex % CARDS_PER_PAGE;
+            if (page == _currentPage && idx < gridRects.Count)
+                return gridRects[idx];
+            else
+                return Rectangle.Empty;
+        }
+
+        // ------------------------------ 模式切换下拉框（废弃） ------------------------------
         private void InitializeModeComboBox()
         {
-            modeComboBox = new ComboBox
-            {
-                DropDownStyle = ComboBoxStyle.DropDownList,
-                Font = new Font("微软雅黑", 10),
-                Width = 100,
-                Height = 25,
-                Visible = false,
-                FlatStyle = FlatStyle.Flat,
-                BackColor = Color.FromArgb(40, 40, 40),
-                ForeColor = Color.White
-            };
-            modeComboBox.Items.AddRange(new object[] { "大理", "中理", "小理", "大文", "全科" });
-            modeComboBox.SelectedItem = appConfig.LastMode;
-            modeComboBox.SelectedIndexChanged += ModeComboBox_SelectedIndexChanged;
-            modeComboBox.DrawMode = DrawMode.OwnerDrawFixed;
-            modeComboBox.DrawItem += ModeComboBox_DrawItem;
+            modeComboBox = new ComboBox { Visible = false };
             Controls.Add(modeComboBox);
         }
 
-        private void ModeComboBox_DrawItem(object sender, DrawItemEventArgs e)
-        {
-            if (e.Index < 0) return;
-            var combo = sender as ComboBox;
-            string text = combo.Items[e.Index].ToString();
-            bool selected = (e.State & DrawItemState.Selected) == DrawItemState.Selected;
-            Color bgColor = selected ? Color.FromArgb(80, 80, 80) : Color.FromArgb(40, 40, 40);
-            using (var bgBrush = new SolidBrush(bgColor))
-                e.Graphics.FillRectangle(bgBrush, e.Bounds);
-            using (var textBrush = new SolidBrush(Color.White))
-                e.Graphics.DrawString(text, combo.Font, textBrush, e.Bounds.Left + 5, e.Bounds.Top + 2);
-            e.DrawFocusRectangle();
-        }
-
-        private void ModeComboBox_SelectedIndexChanged(object sender, EventArgs e)
-        {
-            string newMode = modeComboBox.SelectedItem.ToString();
-            if (newMode == appConfig.LastMode) return;
-            appConfig.LastMode = newMode;
-            appConfig.Save();
-            UpdateSubjectsByMode();
-
-            // 强制重建所有控件
-            bool wasEditMode = EditMode;
-            bool wasRotationMode = rotationMode;
-            if (wasRotationMode)
-            {
-                rotationMode = false;
-                rotationTimer.Stop();
-                if (rotationWebView != null)
-                {
-                    rotationWebView.Dispose();
-                    rotationWebView = null;
-                }
-            }
-            if (wasEditMode)
-                EditMode = false;
-            else
-            {
-                if (_useWebView2) DestroyAllWebView2();
-                DestroyTimeComboBoxes();
-            }
-
-            CalculateGridRects();
-
-            if (wasRotationMode)
-            {
-                rotationMode = true;
-                rotationIndex = 0;
-                rotationTimer.Start();
-                if (_useWebView2) CreateRotationWebView();
-                Invalidate();
-            }
-            else if (wasEditMode)
-                EditMode = true;
-            else
-            {
-                if (_useWebView2)
-                    RecreateWebView2ForGrid();
-                else
-                    Invalidate(); // GDI+ 模式重绘即可
-            }
-            Invalidate();
-        }
-
-        // ------------------------------ 鼠标点击与导出 ------------------------------
-        private void OnMouseClick(object sender, MouseEventArgs e)
-        {
-            Point v = MapToVirtual(e.Location);
-            int x = v.X, y = v.Y;
-
-            if (_drawerOpen && _drawerPanel != null && !_drawerPanel.Bounds.Contains(e.Location))
-                CloseDrawer();
-
-            // 涟漪动画（Win10 下不启用）
-            if (!_isWin10)
-            {
-                _rippleCenter = v;
-                _rippleRadius = 0;
-                _rippleAlpha = 180;
-                float maxRadius = (float)Math.Sqrt(VIRTUAL_SIZE.Width * VIRTUAL_SIZE.Width + VIRTUAL_SIZE.Height * VIRTUAL_SIZE.Height) * 1.2f;
-
-                if (_mouseGlowFadeAnimation != null) _animations.Remove(_mouseGlowFadeAnimation);
-                _mouseGlowAlpha = 0;
-                if (_rippleAnimation != null) _animations.Remove(_rippleAnimation);
-
-                _inRipple = true;
-
-                _rippleAnimation = new Animation
-                {
-                    Duration = TimeSpan.FromMilliseconds(500),
-                    IsLooping = false,
-                    Tag = "ripple"
-                };
-                _rippleAnimation.OnUpdate = (p) =>
-                {
-                    _rippleRadius = maxRadius * (float)p;
-                    _rippleAlpha = (int)(180 * (1 - p));
-                    Invalidate();
-                };
-                _rippleAnimation.OnComplete = () =>
-                {
-                    _rippleCenter = new Point(-1, -1);
-                    _rippleRadius = 0;
-                    _rippleAlpha = 0;
-                    _inRipple = false;
-                    Invalidate();
-
-                    var fadeIn = new Animation
-                    {
-                        Duration = TimeSpan.FromMilliseconds(500),
-                        Tag = "mouseGlowFadeIn"
-                    };
-                    fadeIn.OnUpdate = (p) =>
-                    {
-                        _mouseGlowAlpha = (float)p;
-                        Invalidate();
-                    };
-                    fadeIn.OnComplete = () =>
-                    {
-                        _mouseGlowAlpha = 1;
-                        _mouseGlowFadeAnimation = null;
-                        Invalidate();
-                    };
-                    fadeIn.Start();
-                    _animations.Add(fadeIn);
-                    _mouseGlowFadeAnimation = fadeIn;
-                };
-                _rippleAnimation.Start();
-                _animations.Add(_rippleAnimation);
-            }
-            else
-            {
-                _mouseGlowAlpha = 0;
-            }
-
-            // 轮播模式
-            if (rotationMode)
-            {
-                if (backBtnRect.Contains(x, y))
-                {
-                    rotationMode = false;
-                    rotationTimer.Stop();
-                    if (rotationWebView != null)
-                    {
-                        rotationWebView.Dispose();
-                        rotationWebView = null;
-                    }
-                    if (EditMode)
-                    {
-                        CreatePlainTextEditors();
-                        CreateTimeComboBoxes();
-                    }
-                    else
-                    {
-                        if (_useWebView2)
-                            RecreateWebView2ForGrid();
-                        // GDI+ 模式无需重建，只需重绘
-                    }
-                    StartCardFlyInAnimation();
-                    Invalidate();
-                }
-                else if (fullscreenBtnRect.Contains(x, y))
-                {
-                    if (EditMode) EditMode = false;
-                    ToggleFullscreen();
-                }
-                return;
-            }
-
-            // 非轮播模式
-            bool isWin10 = Environment.OSVersion.Version.Major == 10 && Environment.OSVersion.Version.Minor == 0 && Environment.OSVersion.Version.Build < 22000;
-
-            if (!_buttonsExpanded)
-            {
-                if (expandBtnRect.Contains(x, y))
-                {
-                    _buttonsExpanded = true;
-                    Invalidate();
-                    return;
-                }
-                else if (editBtnRect.Contains(x, y))
-                {
-                    if (EditMode) SaveHomeworkData();
-                    EditMode = !EditMode;
-                    return;
-                }
-                else
-                {
-                    if (isWin10 && minimizeBtnRect.Contains(x, y))
-                    {
-                        WindowState = FormWindowState.Minimized;
-                        return;
-                    }
-                    else if (fullscreenBtnRect.Contains(x, y))
-                    {
-                        if (EditMode) EditMode = false;
-                        ToggleFullscreen();
-                        return;
-                    }
-                }
-            }
-            else
-            {
-                if (collapseBtnRect.Contains(x, y))
-                {
-                    _buttonsExpanded = false;
-                    Invalidate();
-                    return;
-                }
-                else if (settingsBtnRect.Contains(x, y))
-                {
-                    using (var settingsForm = new SettingsForm(this))
-                    {
-                        settingsForm.ShowDialog();
-                    }
-                    return;
-                }
-                else if (rotateBtnRect.Contains(x, y))
-                {
-                    bool hasContent = currentSubjects.Any(subj => homeworkData.Subjects.ContainsKey(subj) && !string.IsNullOrWhiteSpace(homeworkData.Subjects[subj]));
-                    if (!hasContent)
-                    {
-                        MessageBox.Show("所有科目都没有作业内容，无法进入轮播模式", "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                        return;
-                    }
-                    if (EditMode) EditMode = false;
-                    if (_useWebView2)
-                        DestroyAllWebView2();
-                    DestroyTimeComboBoxes();
-                    rotationMode = true;
-                    rotationIndex = 0;
-                    rotationTimer.Start();
-                    if (_useWebView2) CreateRotationWebView();
-                    Invalidate();
-                    return;
-                }
-                else if (exportBtnRect.Contains(x, y))
-                {
-                    ShowExportDialog();
-                    return;
-                }
-                else if (editBtnRect.Contains(x, y))
-                {
-                    if (EditMode) SaveHomeworkData();
-                    EditMode = !EditMode;
-                    return;
-                }
-                else if (historyBtnRect.Contains(x, y))
-                {
-                    if (historyMode)
-                    {
-                        historyMode = false;
-                        historyDate = null;
-                        LoadHomeworkData(currentDate);
-                        Invalidate();
-                    }
-                    else
-                    {
-                        using (var dlg = new HistoryDialog())
-                        {
-                            if (dlg.ShowDialog(this) == DialogResult.OK && dlg.SelectedDate.HasValue)
-                            {
-                                historyDate = dlg.SelectedDate.Value;
-                                LoadHomeworkData(historyDate.Value);
-                                historyMode = true;
-                                Invalidate();
-                            }
-                        }
-                    }
-                    return;
-                }
-                else if (minimizeBtnRect.Contains(x, y))
-                {
-                    WindowState = FormWindowState.Minimized;
-                    return;
-                }
-                else if (closeBtnRect.Contains(x, y))
-                {
-                    Application.Exit();
-                    return;
-                }
-                else if (fullscreenBtnRect.Contains(x, y))
-                {
-                    if (EditMode) EditMode = false;
-                    ToggleFullscreen();
-                    return;
-                }
-            }
-        }
-
-        // ------------------------------ 轮播切换（无动画） ------------------------------
-        private void RotateManual(int direction)
-        {
-            var nonEmpty = new List<int>();
-            for (int i = 0; i < currentSubjects.Length; i++)
-                if (homeworkData.Subjects.ContainsKey(currentSubjects[i]) && !string.IsNullOrWhiteSpace(homeworkData.Subjects[currentSubjects[i]]))
-                    nonEmpty.Add(i);
-            if (nonEmpty.Count == 0)
-            {
-                rotationMode = false;
-                rotationTimer.Stop();
-                StartCardFlyInAnimation();
-                MessageBox.Show("所有科目都没有作业内容，已退出轮播模式", "提示");
-                return;
-            }
-
-            int curIdx = nonEmpty.IndexOf(rotationIndex);
-            if (curIdx < 0) curIdx = 0;
-            int newIdx = (curIdx + direction + nonEmpty.Count) % nonEmpty.Count;
-            int newIndex = nonEmpty[newIdx];
-
-            if (newIndex == rotationIndex) return;
-
-            rotationIndex = newIndex;
-            if (rotationWebView != null)
-            {
-                string subject = currentSubjects[rotationIndex];
-                string content = homeworkData.Subjects.ContainsKey(subject) ? homeworkData.Subjects[subject] : "";
-                _ = UpdateWebView2Content(rotationWebView, content);
-            }
-            else
-            {
-                // GDI+ 模式下的轮播（虽然当前轮播只在 WebView2 模式下支持，但保留逻辑）
-                Invalidate();
-            }
-            Invalidate();
-        }
-
-        private void RotateNext() => RotateManual(1);
-
-        // ------------------------------ 图片加载 ------------------------------
+        // ------------------------------ 图片加载（根据透明度选择主题） ------------------------------
         private void LoadImages()
         {
-            string imagePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Resources");
+            string theme = appConfig.CardOpacity < 50 ? "Dark" : "Light";
+            string imagePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Resources", theme);
             buttonImage = LoadImage(Path.Combine(imagePath, "按钮.png"), new Size(BTN_SQUARE_SIZE, BTN_SQUARE_SIZE));
             historyBtnImage = LoadImage(Path.Combine(imagePath, "更多.png"), new Size(BTN_SQUARE_SIZE, BTN_SQUARE_SIZE));
 
@@ -1845,13 +1811,16 @@ namespace HomeworkViewer
                 backBtnImage = new Bitmap(originalBack, new Size(targetWidth, targetHeight));
             }
 
-            string arrowPath = Path.Combine(imagePath, "箭头图片.png");
-            if (File.Exists(arrowPath))
+            leftArrowImage = LoadImage(Path.Combine(imagePath, "左箭头.png"), true);
+            if (leftArrowImage == null) leftArrowImage = LoadImage(Path.Combine(imagePath, "箭头图片.png"), true);
+            if (leftArrowImage != null)
             {
-                leftArrowImage = Image.FromFile(arrowPath);
                 rightArrowImage = (Image)new Bitmap(leftArrowImage);
                 rightArrowImage.RotateFlip(RotateFlipType.RotateNoneFlipX);
             }
+
+            manageCardImage = LoadImage(Path.Combine(imagePath, "管理卡片.png"), true);
+            addCardImage = LoadImage(Path.Combine(imagePath, "添加卡片.png"), true);
 
             string[] iconNames = { "编辑", "返回", "历史", "轮换", "全屏", "设置", "缩小", "完成", "关闭", "最小化", "展开", "收起", "导出" };
             int iconSize = (int)(BTN_SQUARE_SIZE * 0.6);
@@ -1929,43 +1898,18 @@ namespace HomeworkViewer
                 return;
             }
 
-            // 背景绘制
             if (appConfig.UseBackgroundImage && _backgroundImage != null)
+            {
                 g.DrawImage(_backgroundImage, new Rectangle(0, 0, VIRTUAL_SIZE.Width, VIRTUAL_SIZE.Height));
+            }
             else if (!_micaEnabled)
             {
-                using (var bgBrush = new SolidBrush(Color.FromArgb(_backgroundAlpha, 32, 32, 32)))
-                    g.FillRectangle(bgBrush, new Rectangle(0, 0, VIRTUAL_SIZE.Width, VIRTUAL_SIZE.Height));
-            }
-
-            // 鼠标跟随光晕
-            if (!_isWin10 && appConfig.ShowMouseGlow && !_hideMouseGlow && _mouseVirtualPos.X > 0 && _mouseVirtualPos.X < VIRTUAL_SIZE.Width &&
-                _mouseVirtualPos.Y > 0 && _mouseVirtualPos.Y < VIRTUAL_SIZE.Height && _mouseGlowAlpha > 0)
-            {
-                int centerX = _mouseVirtualPos.X;
-                int centerY = _mouseVirtualPos.Y;
-                int radius = 120;
-                if (radius > 0)
+                using (var bgBrush = new SolidBrush(Color.FromArgb(32, 32, 32, 32)))
                 {
-                    using (var path = new GraphicsPath())
-                    {
-                        path.AddEllipse(centerX - radius, centerY - radius, radius * 2, radius * 2);
-                        if (path.PointCount > 0)
-                        {
-                            using (var brush = new PathGradientBrush(path))
-                            {
-                                int alpha = (int)(80 * _mouseGlowAlpha);
-                                brush.CenterColor = Color.FromArgb(alpha, 255, 255, 255);
-                                brush.SurroundColors = new Color[] { Color.FromArgb(0, 255, 255, 255) };
-                                brush.CenterPoint = new PointF(centerX, centerY);
-                                g.FillPath(brush, path);
-                            }
-                        }
-                    }
+                    g.FillRectangle(bgBrush, new Rectangle(0, 0, VIRTUAL_SIZE.Width, VIRTUAL_SIZE.Height));
                 }
             }
 
-            // 顶部条
             Rectangle barRect = new Rectangle(0, BAR_Y, VIRTUAL_SIZE.Width, BAR_HEIGHT);
             if (gridRects.Count >= 3)
             {
@@ -1982,38 +1926,39 @@ namespace HomeworkViewer
             {
                 g.FillPath(barBrush, barPath);
                 using (var borderPen = new Pen(Color.FromArgb(120, 255, 255, 255), 1))
+                {
                     g.DrawPath(borderPen, barPath);
+                }
             }
 
-            // 日期信息
             DrawDateInfo(g, barRect);
 
-            // 网格或轮播视图
             if (rotationMode)
-                DrawRotationViewBackground(g);
+                DrawRotationView(g);
             else
-                DrawGridBackground(g);
+                DrawGrid(g);
 
-            // 按钮栏
             DrawButtons(g, barRect);
 
-            // 涟漪效果
-            if (!_isWin10 && _rippleCenter.X >= 0 && _rippleCenter.Y >= 0 && _rippleRadius > 0 && _rippleAlpha > 0)
+            if (editMode && !rotationMode && !_isCardEditingMode)
             {
-                float radius = _rippleRadius;
-                using (var path = new GraphicsPath())
+                using (var hintFont = new Font("微软雅黑", 11, FontStyle.Bold | FontStyle.Italic))
+                using (var hintBrush = new SolidBrush(Color.FromArgb(255, 255, 200, 80))) // 亮橙色文字
                 {
-                    path.AddEllipse(_rippleCenter.X - radius, _rippleCenter.Y - radius, radius * 2, radius * 2);
-                    if (path.PointCount > 0)
-                    {
-                        using (var brush = new PathGradientBrush(path))
-                        {
-                            brush.CenterColor = Color.FromArgb((int)_rippleAlpha, 255, 255, 255);
-                            brush.SurroundColors = new Color[] { Color.FromArgb(0, 255, 255, 255) };
-                            brush.CenterPoint = new PointF(_rippleCenter.X, _rippleCenter.Y);
-                            g.FillPath(brush, path);
-                        }
-                    }
+                    string hint = "提示1.点击卡片区域编辑作业内容\n      2.提交时间可通过下拉框修改\n      3.语音输入请在编辑时按下 ⊞+H (Win+H)";
+                    SizeF size = g.MeasureString(hint, hintFont);
+                    float x = (VIRTUAL_SIZE.Width - size.Width) / 2;
+                    float y = VIRTUAL_SIZE.Height - size.Height - 35;
+                    // 计算矩形区域，留出内边距
+                    RectangleF textRect = new RectangleF(x - 5, y - 5, size.Width + 10, size.Height + 10);
+                    // 绘制半透明背景
+                    using (var bgBrush = new SolidBrush(Color.FromArgb(120, 0, 0, 0)))
+                        g.FillRectangle(bgBrush, textRect);
+                    // 绘制边框
+                    using (var borderPen = new Pen(Color.FromArgb(255, 255, 200, 80), 2))
+                        g.DrawRectangle(borderPen, textRect.X, textRect.Y, textRect.Width, textRect.Height);
+                    // 绘制文字
+                    g.DrawString(hint, hintFont, hintBrush, x, y);
                 }
             }
 
@@ -2027,122 +1972,324 @@ namespace HomeworkViewer
             string weekday = weekdays[(int)now.DayOfWeek == 0 ? 6 : (int)now.DayOfWeek - 1];
             string date = now.ToString("yyyy年MM月dd日") + (historyMode ? " (历史作业)" : "");
 
-            using (Brush white = new SolidBrush(Color.White))
+            using (Brush textBrush = new SolidBrush(TEXT_COLOR))
             {
                 if (rotationMode)
                 {
                     int totalHeight = font20.Height + font12.Height;
                     int y = barRect.Top + (barRect.Height - totalHeight) / 2;
                     SizeF wSize = g.MeasureString(weekday, font20);
-                    g.DrawString(weekday, font20, white, (VIRTUAL_SIZE.Width - wSize.Width) / 2, y);
+                    g.DrawString(weekday, font20, textBrush, (VIRTUAL_SIZE.Width - wSize.Width) / 2, y);
                     SizeF dSize = g.MeasureString(date, font12);
-                    g.DrawString(date, font12, white, (VIRTUAL_SIZE.Width - dSize.Width) / 2, y + font20.Height);
+                    g.DrawString(date, font12, textBrush, (VIRTUAL_SIZE.Width - dSize.Width) / 2, y + font20.Height);
                 }
                 else
                 {
                     int totalHeight = font20.Height + font12.Height;
                     int y = barRect.Top + (barRect.Height - totalHeight) / 2;
                     int x = barRect.Left + BAR_PADDING;
-                    g.DrawString(weekday, font20, white, x, y);
-                    g.DrawString(date, font12, white, x, y + font20.Height);
+                    g.DrawString(weekday, font20, textBrush, x, y);
+                    g.DrawString(date, font12, textBrush, x, y + font20.Height);
                 }
             }
         }
 
-        // ------------------------------ 网格背景绘制（GDI+ 模式同时绘制文本并支持滚动） ------------------------------
-        private void DrawGridBackground(Graphics g)
+        // ------------------------------ 按钮绘制（文字颜色使用 TEXT_COLOR） ------------------------------
+        private void DrawButtons(Graphics g, Rectangle barRect)
+        {
+            if (rotationMode)
+            {
+                int backY = barRect.Top + (barRect.Height - BTN_SQUARE_SIZE) / 2;
+                backBtnRect = new Rectangle(35, backY, BTN_SQUARE_SIZE, BTN_SQUARE_SIZE);
+                DrawWin11Button(g, backBtnRect, "返回", buttonIcons.ContainsKey("返回") ? buttonIcons["返回"] : null, ref backBtnRect, backBtnRect.Location, _backPressed, "back");
+
+                int btnY = barRect.Top + (barRect.Height - BTN_SQUARE_SIZE) / 2;
+                int totalButtonsWidth = 3 * BTN_SQUARE_SIZE + 2 * 10;
+                int startX = barRect.Right - totalButtonsWidth - 20;
+
+                Point editPos = new Point(startX, btnY);
+                Point historyPos = new Point(editPos.X + BTN_SQUARE_SIZE + 10, btnY);
+                Point fullscreenPos = new Point(historyPos.X + BTN_SQUARE_SIZE + 10, btnY);
+
+                string editText = editMode ? "完成" : "编辑";
+                string editIcon = editMode ? "完成" : "编辑";
+                DrawWin11Button(g, editBtnRect, editText, buttonIcons.ContainsKey(editIcon) ? buttonIcons[editIcon] : null, ref editBtnRect, editPos, _editPressed, "edit");
+
+                string historyIcon = historyMode ? "返回" : "历史";
+                DrawWin11Button(g, historyBtnRect, historyMode ? "返回" : "历史", buttonIcons.ContainsKey(historyIcon) ? buttonIcons[historyIcon] : null, ref historyBtnRect, historyPos, _historyPressed, "history");
+
+                string fullscreenIcon = fullscreen ? "缩小" : "全屏";
+                DrawWin11Button(g, fullscreenBtnRect, fullscreen ? "缩小" : "全屏", buttonIcons.ContainsKey(fullscreenIcon) ? buttonIcons[fullscreenIcon] : null, ref fullscreenBtnRect, fullscreenPos, _fullscreenPressed, "fullscreen");
+
+                if (leftArrowImage != null && rightArrowImage != null)
+                {
+                    int arrowSize = 46;
+                    leftArrowRect = new Rectangle(50, VIRTUAL_SIZE.Height / 2 - arrowSize / 2, arrowSize, arrowSize);
+                    rightArrowRect = new Rectangle(VIRTUAL_SIZE.Width - 50 - arrowSize, VIRTUAL_SIZE.Height / 2 - arrowSize / 2, arrowSize, arrowSize);
+                    DrawImageCentered(g, leftArrowImage, leftArrowRect);
+                    DrawImageCentered(g, rightArrowImage, rightArrowRect);
+                }
+                else
+                {
+                    int arrowSize = BTN_SQUARE_SIZE;
+                    leftArrowRect = new Rectangle(50, VIRTUAL_SIZE.Height / 2 - arrowSize / 2, arrowSize, arrowSize);
+                    rightArrowRect = new Rectangle(VIRTUAL_SIZE.Width - 50 - arrowSize, VIRTUAL_SIZE.Height / 2 - arrowSize / 2, arrowSize, arrowSize);
+                    DrawDefaultArrow(g, leftArrowRect, true);
+                    DrawDefaultArrow(g, rightArrowRect, false);
+                }
+            }
+            else
+            {
+                int btnY = barRect.Top + (barRect.Height - BTN_SQUARE_SIZE) / 2;
+
+                if (!_buttonsExpanded)
+                {
+                    int totalButtonsWidth = 4 * BTN_SQUARE_SIZE + 3 * 10;
+                    int startX = barRect.Right - totalButtonsWidth - 20;
+                    Point expandPos = new Point(startX, btnY);
+                    Point editPos = new Point(expandPos.X + BTN_SQUARE_SIZE + 10, btnY);
+                    Point fullscreenPos = new Point(editPos.X + BTN_SQUARE_SIZE + 10, btnY);
+                    Point minimizePos = new Point(fullscreenPos.X + BTN_SQUARE_SIZE + 10, btnY);
+
+                    DrawWin11Button(g, expandBtnRect, "展开", buttonIcons.ContainsKey("展开") ? buttonIcons["展开"] : null, ref expandBtnRect, expandPos, _expandPressed, "expand");
+                    DrawWin11Button(g, editBtnRect, editMode ? "完成" : "编辑", buttonIcons.ContainsKey(editMode ? "完成" : "编辑") ? buttonIcons[editMode ? "完成" : "编辑"] : null, ref editBtnRect, editPos, _editPressed, "edit");
+                    DrawWin11Button(g, fullscreenBtnRect, fullscreen ? "缩小" : "全屏", buttonIcons.ContainsKey(fullscreen ? "缩小" : "全屏") ? buttonIcons[fullscreen ? "缩小" : "全屏"] : null, ref fullscreenBtnRect, fullscreenPos, _fullscreenPressed, "fullscreen");
+                    DrawWin11Button(g, minimizeBtnRect, "最小化", buttonIcons.ContainsKey("最小化") ? buttonIcons["最小化"] : null, ref minimizeBtnRect, minimizePos, _minimizePressed, "minimize");
+                }
+                else
+                {
+                    if (_isCardEditingMode)
+                    {
+                        int totalButtonsWidth = 2 * BTN_SQUARE_SIZE + 1 * 10;
+                        int startX = barRect.Right - totalButtonsWidth - 20;
+                        Point managePos = new Point(startX, btnY);
+                        Point addPos = new Point(managePos.X + BTN_SQUARE_SIZE + 10, btnY);
+
+                        DrawWin11Button(g, manageBtnRect, "完成", buttonIcons.ContainsKey("完成") ? buttonIcons["完成"] : null, ref manageBtnRect, managePos, _managePressed, "manage");
+                        DrawWin11Button(g, addCardBtnRect, "添加卡片", addCardImage, ref addCardBtnRect, addPos, _addCardPressed, "addCard");
+                    }
+                    else
+                    {
+                        int totalButtonsWidth = 10 * BTN_SQUARE_SIZE + 9 * 10;
+                        int startX = barRect.Right - totalButtonsWidth - 20;
+                        Point collapsePos = new Point(startX, btnY);
+                        Point settingsPos = new Point(collapsePos.X + BTN_SQUARE_SIZE + 10, btnY);
+                        Point rotatePos = new Point(settingsPos.X + BTN_SQUARE_SIZE + 10, btnY);
+                        Point managePos = new Point(rotatePos.X + BTN_SQUARE_SIZE + 10, btnY);
+                        Point exportPos = new Point(managePos.X + BTN_SQUARE_SIZE + 10, btnY);
+                        Point editPos = new Point(exportPos.X + BTN_SQUARE_SIZE + 10, btnY);
+                        Point historyPos = new Point(editPos.X + BTN_SQUARE_SIZE + 10, btnY);
+                        Point fullscreenPos = new Point(historyPos.X + BTN_SQUARE_SIZE + 10, btnY);
+                        Point minimizePos = new Point(fullscreenPos.X + BTN_SQUARE_SIZE + 10, btnY);
+                        Point closePos = new Point(minimizePos.X + BTN_SQUARE_SIZE + 10, btnY);
+
+                        DrawWin11Button(g, collapseBtnRect, "收起", buttonIcons.ContainsKey("收起") ? buttonIcons["收起"] : null, ref collapseBtnRect, collapsePos, _collapsePressed, "collapse");
+                        DrawWin11Button(g, settingsBtnRect, "设置", buttonIcons.ContainsKey("设置") ? buttonIcons["设置"] : null, ref settingsBtnRect, settingsPos, _settingsPressed, "settings");
+                        DrawWin11Button(g, rotateBtnRect, "轮换", buttonIcons.ContainsKey("轮换") ? buttonIcons["轮换"] : null, ref rotateBtnRect, rotatePos, _rotatePressed, "rotate");
+                        DrawWin11Button(g, manageBtnRect, "卡片管理", manageCardImage, ref manageBtnRect, managePos, _managePressed, "manage");
+                        DrawWin11Button(g, exportBtnRect, "导出", buttonIcons.ContainsKey("导出") ? buttonIcons["导出"] : null, ref exportBtnRect, exportPos, _exportPressed, "export");
+                        DrawWin11Button(g, editBtnRect, editMode ? "完成" : "编辑", buttonIcons.ContainsKey(editMode ? "完成" : "编辑") ? buttonIcons[editMode ? "完成" : "编辑"] : null, ref editBtnRect, editPos, _editPressed, "edit");
+                        DrawWin11Button(g, historyBtnRect, historyMode ? "返回" : "历史", buttonIcons.ContainsKey(historyMode ? "返回" : "历史") ? buttonIcons[historyMode ? "返回" : "历史"] : null, ref historyBtnRect, historyPos, _historyPressed, "history");
+                        DrawWin11Button(g, fullscreenBtnRect, fullscreen ? "缩小" : "全屏", buttonIcons.ContainsKey(fullscreen ? "缩小" : "全屏") ? buttonIcons[fullscreen ? "缩小" : "全屏"] : null, ref fullscreenBtnRect, fullscreenPos, _fullscreenPressed, "fullscreen");
+                        DrawWin11Button(g, minimizeBtnRect, "最小化", buttonIcons.ContainsKey("最小化") ? buttonIcons["最小化"] : null, ref minimizeBtnRect, minimizePos, _minimizePressed, "minimize");
+                        DrawWin11Button(g, closeBtnRect, "关闭", buttonIcons.ContainsKey("关闭") ? buttonIcons["关闭"] : null, ref closeBtnRect, closePos, _closePressed, "close");
+                    }
+                }
+            }
+        }
+
+        private void DrawWin11Button(Graphics g, Rectangle rect, string text, Image icon, ref Rectangle targetRect, Point pos, bool pressed, string key)
+        {
+            targetRect = new Rectangle(pos, new Size(BTN_SQUARE_SIZE, BTN_SQUARE_SIZE));
+            bool isPressed = _buttonPressed.GetValueOrDefault(key) || pressed;
+
+            float hoverProgress = _buttonHoverProgress.GetValueOrDefault(key, 0);
+
+            int centerX = targetRect.X + targetRect.Width / 2;
+            int centerY = targetRect.Y + targetRect.Height / 2;
+            int maxRadius = targetRect.Width / 2;
+
+            if (hoverProgress > 0)
+            {
+                float radiusGrowth = (float)Math.Pow(hoverProgress, 0.8);
+                for (int i = 0; i < 4; i++)
+                {
+                    float radiusFactor = 0.6f + i * 0.15f;
+                    float radius = maxRadius * radiusFactor * radiusGrowth;
+                    int baseAlpha = 25 - i * 10;
+                    if (baseAlpha < 0) baseAlpha = 0;
+                    int alpha = (int)(baseAlpha * hoverProgress);
+                    if (alpha > 0)
+                    {
+                        using (var brush = new SolidBrush(Color.FromArgb(alpha, 255, 255, 255)))
+                        {
+                            g.FillEllipse(brush, centerX - radius, centerY - radius, radius * 2, radius * 2);
+                        }
+                    }
+                }
+            }
+
+            if (icon != null)
+            {
+                int targetHeight = (int)(targetRect.Height * 0.5);
+                int targetWidth = (int)((float)icon.Width / icon.Height * targetHeight);
+                int iconX = targetRect.Left + (targetRect.Width - targetWidth) / 2;
+                int iconY = targetRect.Top + (targetRect.Height - targetHeight) / 2 - 7;
+                g.DrawImage(icon, iconX, iconY, targetWidth, targetHeight);
+            }
+
+            using (var smallFont = new Font("微软雅黑", 8))
+            using (var textBrush = new SolidBrush(TEXT_COLOR))
+            {
+                SizeF textSize = g.MeasureString(text, smallFont);
+                float textX = targetRect.Left + (targetRect.Width - textSize.Width) / 2;
+                float textY = targetRect.Bottom - textSize.Height - 1;
+                g.DrawString(text, smallFont, textBrush, textX, textY);
+            }
+        }
+
+        private void DrawDefaultArrow(Graphics g, Rectangle rect, bool left)
+        {
+            using (var brush = new SolidBrush(Color.DarkGray))
+            {
+                Point[] points;
+                if (left)
+                    points = new Point[] { new Point(rect.Right, rect.Top), new Point(rect.Right, rect.Bottom), new Point(rect.Left, rect.Top + rect.Height / 2) };
+                else
+                    points = new Point[] { new Point(rect.Left, rect.Top), new Point(rect.Left, rect.Bottom), new Point(rect.Right, rect.Top + rect.Height / 2) };
+                g.FillPolygon(brush, points);
+            }
+        }
+
+        private void DrawImageCentered(Graphics g, Image img, Rectangle container)
+        {
+            float scale = Math.Min((float)container.Width / img.Width, (float)container.Height / img.Height);
+            int w = (int)(img.Width * scale);
+            int h = (int)(img.Height * scale);
+            int x = container.X + (container.Width - w) / 2;
+            int y = container.Y + (container.Height - h) / 2;
+            g.DrawImage(img, x, y, w, h);
+        }
+
+        // ------------------------------ 网格绘制 ------------------------------
+        private List<Rectangle> GetPageGridRects()
+        {
+            return gridRects;
+        }
+
+        private void DrawGrid(Graphics g)
         {
             float opacityFactor = appConfig.CardOpacity / 100f;
-            for (int i = 0; i < gridRects.Count; i++)
+            List<Rectangle> pageRects = GetPageGridRects();
+            int startIndex = _currentPage * CARDS_PER_PAGE;
+            int visibleCardCount = Math.Min(CARDS_PER_PAGE, appConfig.CustomSubjects.Count - startIndex);
+            _deleteButtonRects.Clear();
+
+            // 绘制真实卡片
+            for (int i = 0; i < visibleCardCount; i++)
             {
-                Rectangle rect = gridRects[i];
+                int cardIndex = startIndex + i;
+                string subject = appConfig.CustomSubjects[cardIndex];
+                Rectangle rect = pageRects[i];
+
+                // 飞出/飞入偏移
                 float offsetX = 0;
-                int alpha = 255;
-                if (_cardAnimations.TryGetValue(i, out var anim) && anim.IsRunning)
-                {
-                    double eased = 1 - Math.Pow(1 - anim.Progress, 2);
-                    float startX = VIRTUAL_SIZE.Width;
-                    float targetX = rect.X;
-                    offsetX = (startX - targetX) * (1 - (float)eased);
-                    alpha = (int)(255 * eased);
-                }
+                if (_flyOutProgress.TryGetValue(cardIndex, out float flyOutOffset))
+                    offsetX = flyOutOffset;
+                else if (_flyInOffsets.TryGetValue(cardIndex, out float flyInOffset))
+                    offsetX = flyInOffset;
+
                 Rectangle drawRect = new Rectangle(rect.X + (int)offsetX, rect.Y, rect.Width, rect.Height);
 
+                // 保存当前变换（用于抖动后恢复）
+                Matrix originalTransform = g.Transform;
+
+                if (_isCardEditingMode && _shakeAngle != 0 && !_isDragging)
+                {
+                    g.TranslateTransform(drawRect.X + drawRect.Width / 2, drawRect.Y + drawRect.Height / 2);
+                    g.RotateTransform(_shakeAngle);
+                    g.TranslateTransform(-(drawRect.X + drawRect.Width / 2), -(drawRect.Y + drawRect.Height / 2));
+                }
+
+                // 阴影
                 using (var shadowPath = CreateRoundedRectPath(new Rectangle(drawRect.X + 3, drawRect.Y + 3, drawRect.Width, drawRect.Height), ROUND_RADIUS))
                 using (var shadowBrush = new SolidBrush(Color.FromArgb(30, 0, 0, 0)))
                     g.FillPath(shadowBrush, shadowPath);
 
-                int topAlpha = (int)(220 * opacityFactor * alpha / 255.0);
-                int bottomAlpha = (int)(160 * opacityFactor * alpha / 255.0);
+                int topAlpha = (int)(220 * opacityFactor);
+                int bottomAlpha = (int)(160 * opacityFactor);
                 using (var path = CreateRoundedRectPath(drawRect, ROUND_RADIUS))
                 using (var bgBrush = new LinearGradientBrush(drawRect, Color.FromArgb(topAlpha, 255, 255, 255), Color.FromArgb(bottomAlpha, 240, 240, 255), LinearGradientMode.Vertical))
                 {
-                    g.FillPath(bgBrush, path);
-                    string subject = currentSubjects[i];
-                    string dueTime = homeworkData.DueTimes.ContainsKey(subject) ? homeworkData.DueTimes[subject] : "";
-                    bool highlightActive = _activeEvenings.Contains(dueTime);
-                    bool highlightFlash = _flashingEvenings.Contains(dueTime);
-                    Color borderColor = Color.FromArgb(100, 128, 128, 128);
-                    float borderWidth = 1;
-                    if (_debugFlashing || highlightFlash)
+                    if (_isDragging && _isCardEditingMode)
                     {
-                        using (var redBrush = new SolidBrush(Color.FromArgb(flashStep, 255, 0, 0)))
-                            g.FillPath(redBrush, path);
-                        DrawLaserBorder(g, path, drawRect);
-                        borderColor = Color.FromArgb(200, 255, 0, 0);
-                    }
-                    else if (highlightActive) { borderColor = SystemColors.Highlight; borderWidth = 2; }
-                    using (var pen = new Pen(borderColor, borderWidth))
-                        g.DrawPath(pen, path);
-                }
-
-                // 绘制科目名和提交时间
-                if (i < currentSubjects.Length)
-                {
-                    string subject = currentSubjects[i];
-                    Font subjectFont = font22;
-                    Font dueTimeFont = font22;
-                    Font dueTimeLabelFont = fontSmall;
-                    int topOffset = 50;
-                    if (appConfig.LastMode == "全科")
-                    {
-                        subjectFont = font20;
-                        dueTimeFont = font20;
-                        dueTimeLabelFont = fontSmall;
-                        topOffset = 40;
-                    }
-                    int subjectY = drawRect.Top + topOffset - subjectFont.Height;
-                    g.DrawString(subject, subjectFont, new SolidBrush(TEXT_COLOR), drawRect.Left + 10, subjectY);
-                    int lineY = drawRect.Top + topOffset;
-                    g.DrawLine(Pens.Gray, drawRect.Left + 10, lineY, drawRect.Right - 10, lineY);
-
-                    if (appConfig.ShowDueTime && !EditMode)
-                    {
-                        string dueTime = homeworkData.DueTimes.ContainsKey(subject) ? homeworkData.DueTimes[subject] : "";
-                        string prefix = "提交时间：";
-                        string displayTime = string.IsNullOrEmpty(dueTime) ? "无" : dueTime;
-                        float prefixWidth = g.MeasureString(prefix, dueTimeLabelFont).Width;
-                        float timeWidth = g.MeasureString(displayTime, dueTimeFont).Width;
-                        float totalWidth = prefixWidth + timeWidth;
-                        int rightX = drawRect.Right - 10;
-                        float startX = rightX - totalWidth;
-                        int timeY = lineY - dueTimeFont.Height;
-                        int prefixY = lineY - dueTimeLabelFont.Height;
-                        g.DrawString(prefix, dueTimeLabelFont, new SolidBrush(TEXT_COLOR), startX, prefixY);
-                        Brush timeBrush = GetDueTimeBrush(displayTime);
-                        g.DrawString(displayTime, dueTimeFont, timeBrush, startX + prefixWidth, timeY);
-                        if (timeBrush != RED_SEMI && timeBrush != ORANGE_SEMI && timeBrush != GREEN_SEMI && timeBrush != BLUE_SEMI && timeBrush != PURPLE_SEMI && timeBrush != DARKORANGE_SEMI) timeBrush.Dispose();
-                    }
-
-                    // 绘制作业内容（GDI+ 模式，支持滚动）
-                    if (!editMode && !_useWebView2)
-                    {
-                        Rectangle textArea = new Rectangle(drawRect.Left + 10, drawRect.Top + topOffset + 10, drawRect.Width - 20, drawRect.Height - (topOffset + 20));
-                        string content = homeworkData.Subjects.ContainsKey(subject) ? homeworkData.Subjects[subject] : "";
-                        if (!string.IsNullOrWhiteSpace(content))
+                        using (var grayBrush = new SolidBrush(Color.FromArgb(100, 40, 40, 40)))
+                            g.FillPath(grayBrush, path);
+                        if (cardIndex == _dragStartIndex)
                         {
-                            float offset = scrollOffsets.ContainsKey(i) ? scrollOffsets[i] : 0f;
-                            DrawTextInArea(g, content, textArea, font30, false, offset);
+                            using (var pen = new Pen(Color.Blue, 3))
+                                g.DrawPath(pen, path);
+                        }
+                        else
+                        {
+                            using (var pen = new Pen(Color.FromArgb(80, 80, 80), 1))
+                                g.DrawPath(pen, path);
+                        }
+                    }
+                    else
+                    {
+                        // 正常卡片
+                        g.FillPath(bgBrush, path);
+
+                        string dueTime = homeworkData.DueTimes.ContainsKey(subject) ? homeworkData.DueTimes[subject] : "";
+                        bool highlightActive = _activeEvenings.Contains(dueTime);
+                        bool highlightFlash = _flashingEvenings.Contains(dueTime);
+                        Color borderColor = Color.FromArgb(100, 128, 128, 128);
+                        float borderWidth = 1;
+                        if (_debugFlashing || highlightFlash)
+                        {
+                            using (var redBrush = new SolidBrush(Color.FromArgb(flashStep, 255, 0, 0)))
+                                g.FillPath(redBrush, path);
+                            DrawLaserBorder(g, path, drawRect);
+                            borderColor = Color.FromArgb(200, 255, 0, 0);
+                        }
+                        else if (highlightActive) { borderColor = SystemColors.Highlight; borderWidth = 2; }
+                        using (var pen = new Pen(borderColor, borderWidth))
+                            g.DrawPath(pen, path);
+
+                        // 科目名称
+                        Font subjectFont = font22;
+                        int topOffset = 50;
+                        int subjectY = drawRect.Top + topOffset - subjectFont.Height;
+                        g.DrawString(subject, subjectFont, new SolidBrush(TEXT_COLOR), drawRect.Left + 10, subjectY);
+                        int lineY = drawRect.Top + topOffset;
+                        g.DrawLine(Pens.Gray, drawRect.Left + 10, lineY, drawRect.Right - 10, lineY);
+
+                        // 提交时间
+                        if (appConfig.ShowDueTime && !EditMode)
+                        {
+                            string dueTime2 = homeworkData.DueTimes.ContainsKey(subject) ? homeworkData.DueTimes[subject] : "";
+                            string prefix = "提交时间：";
+                            string displayTime = string.IsNullOrEmpty(dueTime2) ? "无" : dueTime2;
+                            float prefixWidth = g.MeasureString(prefix, fontSmall).Width;
+                            float timeWidth = g.MeasureString(displayTime, font22).Width;
+                            float totalWidth = prefixWidth + timeWidth;
+                            int rightX = drawRect.Right - 10;
+                            float startX = rightX - totalWidth;
+                            int timeY = lineY - font22.Height;
+                            int prefixY = lineY - fontSmall.Height;
+                            g.DrawString(prefix, fontSmall, new SolidBrush(TEXT_COLOR), startX, prefixY);
+                            Brush timeBrush = GetDueTimeBrush(displayTime);
+                            g.DrawString(displayTime, font22, timeBrush, startX + prefixWidth, timeY);
+                        }
+
+                        // 作业内容
+                        Rectangle textArea = new Rectangle(drawRect.Left + 10, drawRect.Top + topOffset + 10, drawRect.Width - 20, drawRect.Height - (topOffset + 20));
+                        if (editingSubjectIndex == cardIndex && currentEditType == EditFieldType.Subject) { }
+                        else if (homeworkData.Subjects.ContainsKey(subject) && !string.IsNullOrWhiteSpace(homeworkData.Subjects[subject]))
+                        {
+                            float offset = scrollOffsets.ContainsKey(cardIndex) ? scrollOffsets[cardIndex] : 0f;
+                            DrawPlainTextInArea(g, homeworkData.Subjects[subject], textArea, font30, false, offset);
                         }
                         else
                         {
@@ -2154,51 +2301,177 @@ namespace HomeworkViewer
                         }
                     }
                 }
+
+                if (_isCardEditingMode && _shakeAngle != 0 && !_isDragging)
+                    g.Transform = originalTransform;
+
+                // 删除按钮
+                if (_isCardEditingMode && !_isDragging)
+                {
+                    int radius = ROUND_RADIUS;
+                    int centerX = drawRect.Right - radius;
+                    int centerY = drawRect.Top + radius;
+                    int delRadius = 12;
+                    Rectangle deleteRect = new Rectangle(centerX - delRadius, centerY - delRadius, delRadius * 2, delRadius * 2);
+                    _deleteButtonRects.Add(deleteRect);
+                    using (SolidBrush redBrush = new SolidBrush(Color.Red))
+                        g.FillEllipse(redBrush, deleteRect);
+                    using (Font font = new Font("微软雅黑", 12, FontStyle.Bold))
+                    using (Brush whiteBrush = new SolidBrush(Color.White))
+                    {
+                        SizeF xSize = g.MeasureString("×", font);
+                        float xOffset = (deleteRect.Width - xSize.Width) / 2;
+                        float yOffset = (deleteRect.Height - xSize.Height) / 2;
+                        g.DrawString("×", font, whiteBrush, deleteRect.X + xOffset, deleteRect.Y + yOffset);
+                    }
+                }
             }
 
-            // WebView2 模式下的控件创建（仅在非编辑非轮播时）
-            if (!rotationMode && !editMode && _useWebView2 && webView2Initialized)
+            // 目标卡片虚线边框（拖拽中）
+            if (_isDragging && _isCardEditingMode && _dragOverIndex != -1 && _dragOverIndex != _dragStartIndex)
             {
-                for (int i = 0; i < gridRects.Count && i < currentSubjects.Length; i++)
+                int startIdx = _currentPage * CARDS_PER_PAGE;
+                int localIdx = _dragOverIndex - startIdx;
+                if (localIdx >= 0 && localIdx < gridRects.Count)
                 {
-                    if (i >= cardWebViews.Count)
+                    Rectangle rect = gridRects[localIdx];
+                    float offsetX = 0;
+                    if (_flyOutProgress.TryGetValue(_dragOverIndex, out float flyOff))
+                        offsetX = flyOff;
+                    else if (_flyInOffsets.TryGetValue(_dragOverIndex, out float flyInOff))
+                        offsetX = flyInOff;
+                    Rectangle drawRect = new Rectangle(rect.X + (int)offsetX, rect.Y, rect.Width, rect.Height);
+                    using (var dashPen = new Pen(Color.Blue, 2) { DashStyle = DashStyle.Dash })
+                    using (var outlinePath = CreateRoundedRectPath(drawRect, ROUND_RADIUS))
+                        g.DrawPath(dashPen, outlinePath);
+                }
+            }
+
+            // 卡片管理模式下绘制虚拟添加卡片（当最后一页已满时，显示在新的一页）
+            if (_isCardEditingMode && !_isDragging)
+            {
+                int realTotalPages = (int)Math.Ceiling(appConfig.CustomSubjects.Count / (double)CARDS_PER_PAGE);
+                bool isVirtualPage = (_showVirtualAddCardPage && _currentPage == realTotalPages);
+                if (isVirtualPage)
+                {
+                    // 虚拟页只画一个卡片（位置为网格第一个）
+                    if (gridRects.Count > 0)
                     {
-                        Rectangle textArea = GetContentArea(i);
-                        CreateWebView2ForCard(i, textArea);
+                        Rectangle emptyRect = gridRects[0];
+                        float offsetX = _virtualCardOffset + _virtualCardFlyOutOffset;
+                        Rectangle drawRect = new Rectangle(emptyRect.X + (int)offsetX, emptyRect.Y, emptyRect.Width, emptyRect.Height);
+                        using (var path = CreateRoundedRectPath(drawRect, ROUND_RADIUS))
+                        {
+                            using (var dashPen = new Pen(Color.Blue, 3) { DashStyle = DashStyle.Dash })
+                                g.DrawPath(dashPen, path);
+                            if (addCardImage != null)
+                            {
+                                int iconSize = 80;
+                                int iconX = drawRect.X + (drawRect.Width - iconSize) / 2;
+                                int iconY = drawRect.Y + (drawRect.Height - iconSize - 30) / 2;
+                                g.DrawImage(addCardImage, iconX, iconY, iconSize, iconSize);
+                            }
+                            string addText = "添加卡片";
+                            using (Font textFont = new Font("微软雅黑", 12, FontStyle.Bold))
+                            using (Brush textBrush = new SolidBrush(Color.White))
+                            {
+                                SizeF textSize = g.MeasureString(addText, textFont);
+                                float textX = drawRect.X + (drawRect.Width - textSize.Width) / 2;
+                                float textY = drawRect.Y + drawRect.Height - 35;
+                                g.DrawString(addText, textFont, textBrush, textX, textY);
+                            }
+                            _virtualAddCardRect = drawRect;
+                        }
+                    }
+                }
+                else
+                {
+                    // 正常页面可能也有空位，显示在当前页末尾（之前已实现的逻辑）
+                    int cardsOnThisPage = visibleCardCount;
+                    if (cardsOnThisPage < CARDS_PER_PAGE)
+                    {
+                        int emptyLocalIndex = cardsOnThisPage;
+                        if (emptyLocalIndex < pageRects.Count)
+                        {
+                            Rectangle emptyRect = pageRects[emptyLocalIndex];
+                            float offsetX = _virtualCardOffset + _virtualCardFlyOutOffset;
+                            Rectangle drawRect = new Rectangle(emptyRect.X + (int)offsetX, emptyRect.Y, emptyRect.Width, emptyRect.Height);
+                            using (var path = CreateRoundedRectPath(drawRect, ROUND_RADIUS))
+                            {
+                                using (var dashPen = new Pen(Color.Blue, 3) { DashStyle = DashStyle.Dash })
+                                    g.DrawPath(dashPen, path);
+                                if (addCardImage != null)
+                                {
+                                    int iconSize = 80;
+                                    int iconX = drawRect.X + (drawRect.Width - iconSize) / 2;
+                                    int iconY = drawRect.Y + (drawRect.Height - iconSize - 30) / 2;
+                                    g.DrawImage(addCardImage, iconX, iconY, iconSize, iconSize);
+                                }
+                                string addText = "添加卡片";
+                                using (Font textFont = new Font("微软雅黑", 12, FontStyle.Bold))
+                                using (Brush textBrush = new SolidBrush(Color.White))
+                                {
+                                    SizeF textSize = g.MeasureString(addText, textFont);
+                                    float textX = drawRect.X + (drawRect.Width - textSize.Width) / 2;
+                                    float textY = drawRect.Y + drawRect.Height - 35;
+                                    g.DrawString(addText, textFont, textBrush, textX, textY);
+                                }
+                                _virtualAddCardRect = drawRect;
+                            }
+                        }
+                        else
+                        {
+                            _virtualAddCardRect = Rectangle.Empty;
+                        }
                     }
                     else
                     {
-                        Rectangle textArea = GetContentArea(i);
-                        UpdateWebView2Position(cardWebViews[i], textArea);
+                        _virtualAddCardRect = Rectangle.Empty;
                     }
                 }
-                for (int i = currentSubjects.Length; i < cardWebViews.Count; i++)
-                    cardWebViews[i].Visible = false;
+            }
+
+            // 分页箭头
+            if (TotalPages > 1 && !rotationMode && leftArrowImage != null && rightArrowImage != null)
+            {
+                int arrowSize = 40;
+                leftArrowRect = new Rectangle(20, VIRTUAL_SIZE.Height / 2 - arrowSize / 2, arrowSize, arrowSize);
+                rightArrowRect = new Rectangle(VIRTUAL_SIZE.Width - 20 - arrowSize, VIRTUAL_SIZE.Height / 2 - arrowSize / 2, arrowSize, arrowSize);
+                DrawImageCentered(g, leftArrowImage, leftArrowRect);
+                DrawImageCentered(g, rightArrowImage, rightArrowRect);
             }
         }
 
-        // ------------------------------ 轮播模式背景绘制（仅背景，WebView 单独控制） ------------------------------
-        private void DrawRotationViewBackground(Graphics g)
+        private void DrawRotationView(Graphics g)
         {
             float opacityFactor = appConfig.CardOpacity / 100f;
             int topAlpha = (int)(220 * opacityFactor);
             int bottomAlpha = (int)(160 * opacityFactor);
-            Rectangle cardRect = new Rectangle(150, 100, 900, 475);
-            DrawSingleCardBackground(g, cardRect, topAlpha, bottomAlpha);
+            Rectangle bigRect = new Rectangle(150, 100, 900, 475);
 
-            if (rotationMode && !editMode && _useWebView2 && webView2Initialized)
+            if (_isSliding)
             {
-                if (rotationWebView == null)
-                    CreateRotationWebView();
+                if (_slidePhase == 0)
+                {
+                    int oldOffsetX = (int)(-_slideProgress * bigRect.Width);
+                    Rectangle oldRect = new Rectangle(bigRect.X + oldOffsetX, bigRect.Y, bigRect.Width, bigRect.Height);
+                    DrawSingleCard(g, oldRect, appConfig.CustomSubjects[_oldSlideIndex], _oldSlideContent, topAlpha, bottomAlpha);
+                }
                 else
                 {
-                    Rectangle webViewRect = new Rectangle(150, 230, 900, 345);
-                    UpdateWebView2Position(rotationWebView, webViewRect);
+                    int newOffsetX = (int)((1 - _slideProgress) * bigRect.Width);
+                    Rectangle newRect = new Rectangle(bigRect.X + newOffsetX, bigRect.Y, bigRect.Width, bigRect.Height);
+                    DrawSingleCard(g, newRect, appConfig.CustomSubjects[_newSlideIndex], _newSlideContent, topAlpha, bottomAlpha);
                 }
+            }
+            else
+            {
+                string currentText = homeworkData.Subjects.ContainsKey(appConfig.CustomSubjects[rotationIndex]) ? homeworkData.Subjects[appConfig.CustomSubjects[rotationIndex]] : "";
+                DrawSingleCard(g, bigRect, appConfig.CustomSubjects[rotationIndex], currentText, topAlpha, bottomAlpha);
             }
         }
 
-        private void DrawSingleCardBackground(Graphics g, Rectangle rect, int topAlpha, int bottomAlpha)
+        private void DrawSingleCard(Graphics g, Rectangle rect, string subject, string content, int topAlpha, int bottomAlpha)
         {
             using (var path = CreateRoundedRectPath(rect, ROUND_RADIUS))
             using (var bgBrush = new LinearGradientBrush(rect, Color.FromArgb(topAlpha, 255, 255, 255), Color.FromArgb(bottomAlpha, 240, 240, 255), LinearGradientMode.Vertical))
@@ -2208,7 +2481,6 @@ namespace HomeworkViewer
                     g.DrawPath(pen, path);
             }
 
-            string subject = rotationIndex < currentSubjects.Length ? currentSubjects[rotationIndex] : "";
             SizeF subjectSize = g.MeasureString(subject, font36);
             g.DrawString(subject, font36, Brushes.White, rect.X + (rect.Width - subjectSize.Width) / 2, rect.Y + 30);
 
@@ -2230,12 +2502,29 @@ namespace HomeworkViewer
                 g.DrawString(prefix, fontSmall, new SolidBrush(TEXT_COLOR), startX, prefixY);
                 Brush timeBrush = GetDueTimeBrush(displayTime);
                 g.DrawString(displayTime, font22, timeBrush, startX + prefixWidth, timeY);
-                if (timeBrush != RED_SEMI && timeBrush != ORANGE_SEMI && timeBrush != GREEN_SEMI && timeBrush != BLUE_SEMI && timeBrush != PURPLE_SEMI && timeBrush != DARKORANGE_SEMI) timeBrush.Dispose();
+            }
+
+            Rectangle textArea = new Rectangle(rect.X + 50, rect.Y + 150, rect.Width - 100, rect.Height - 200);
+            if (!string.IsNullOrWhiteSpace(content))
+            {
+                DrawPlainTextInArea(g, content, textArea, font30, true, 0);
+            }
+            else
+            {
+                g.DrawString("今天暂时没有此项作业", font30, RED_SEMI, textArea, CenterStringFormat());
             }
         }
 
-        // ------------------------------ GDI+ 文本绘制（支持滚动） ------------------------------
-        private void DrawTextInArea(Graphics g, string text, Rectangle area, Font font, bool center = false, float scrollOffset = 0f)
+        private void DrawLaserBorder(Graphics g, GraphicsPath path, Rectangle rect)
+        {
+            using (var pen = new Pen(Color.Red, 3) { DashStyle = DashStyle.Custom, DashPattern = new float[] { 8, 8 }, DashOffset = _laserOffset * 16 })
+                g.DrawPath(pen, path);
+        }
+
+        private StringFormat CenterStringFormat() => new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center };
+
+        // ------------------------------ 纯文本渲染 ------------------------------
+        private void DrawPlainTextInArea(Graphics g, string text, Rectangle area, Font font, bool center = false, float scrollOffset = 0f)
         {
             var lines = new List<string>();
             foreach (string para in text.Split('\n'))
@@ -2289,32 +2578,81 @@ namespace HomeworkViewer
             g.Restore(state);
         }
 
-        private float MeasureTextHeight(string text, Font font, int maxWidth)
+        // ------------------------------ 时间提醒与闪烁 ------------------------------
+        private void CheckEveningClassStates()
         {
-            using (var g = CreateGraphics())
-                return g.MeasureString(text, font, maxWidth).Height;
+            if (!appConfig.ShowDueTime || appConfig.EveningClassTimes == null || appConfig.EveningClassTimes.Count == 0)
+            {
+                if (_activeEvenings.Count > 0 || _flashingEvenings.Count > 0 || _grayEvenings.Count > 0)
+                {
+                    _activeEvenings.Clear();
+                    _flashingEvenings.Clear();
+                    _grayEvenings.Clear();
+                    StopFlashingIfNeeded();
+                    Invalidate();
+                }
+                return;
+            }
+
+            DateTime now = DateTime.Now;
+            var newActive = new List<string>();
+            var newFlashing = new List<string>();
+            var newGray = new List<string>();
+            bool newFlashingExists = false;
+
+            for (int i = 0; i < appConfig.EveningClassTimes.Count; i++)
+            {
+                var time = appConfig.EveningClassTimes[i];
+                string eveningName = $"晚修{i + 1}";
+                if (DateTime.TryParse(time.Start, out DateTime start) && DateTime.TryParse(time.End, out DateTime end))
+                {
+                    DateTime startToday = DateTime.Today.Add(start.TimeOfDay);
+                    DateTime endToday = DateTime.Today.Add(end.TimeOfDay);
+                    if (now >= startToday && now < endToday) newActive.Add(eveningName);
+                    else if (now >= endToday.AddMinutes(-2) && now <= endToday.AddMinutes(2)) { newFlashing.Add(eveningName); newFlashingExists = true; }
+                    else if (now > endToday.AddMinutes(2)) newGray.Add(eveningName);
+                }
+            }
+
+            bool changed = !_activeEvenings.SequenceEqual(newActive) || !_flashingEvenings.SequenceEqual(newFlashing) || !_grayEvenings.SequenceEqual(newGray);
+            if (changed)
+            {
+                _activeEvenings = newActive;
+                _flashingEvenings = newFlashing;
+                _grayEvenings = newGray;
+                if (_flashingEvenings.Count > 0 && !_debugFlashing) StartFlashing();
+                else if (_flashingEvenings.Count == 0 && !_debugFlashing) StopFlashingIfNeeded();
+                Invalidate();
+            }
         }
 
-        private void DrawLaserBorder(Graphics g, GraphicsPath path, Rectangle rect)
+        private void StartFlashing() { if (!flashTimer.Enabled) { flashStartTime = DateTime.Now; flashTimer.Start(); } }
+        private void StopFlashingIfNeeded() { if (_flashingEvenings.Count == 0 && !_debugFlashing) { flashTimer.Stop(); Invalidate(); } }
+        private void FlashTimer_Tick(object sender, EventArgs e)
         {
-            using (var pen = new Pen(Color.Red, 3) { DashStyle = DashStyle.Custom, DashPattern = new float[] { 8, 8 }, DashOffset = _laserOffset * 16 })
-                g.DrawPath(pen, path);
+            if (_debugFlashing && (DateTime.Now - _debugFlashStartTime).TotalSeconds > FLASH_DURATION) { _debugFlashing = false; StopFlashingIfNeeded(); }
+            double angle = (DateTime.Now - flashStartTime).TotalMilliseconds / 500.0;
+            flashStep = (int)((Math.Sin(angle) + 1) * 60);
+            _laserOffset += 0.1f;
+            if (_laserOffset >= 1f) _laserOffset -= 1f;
+            Invalidate();
         }
+        public void StartDebugFlashing() { _debugFlashing = true; _debugFlashStartTime = DateTime.Now; StartFlashing(); Invalidate(); }
+        public void StopDebugFlashing() { _debugFlashing = false; StopFlashingIfNeeded(); }
 
-        private StringFormat CenterStringFormat() => new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center };
-
-        // ------------------------------ 滚动定时器（仅 GDI+ 模式） ------------------------------
+        // ------------------------------ 滚动 ------------------------------
         private void ScrollTimer_Tick(object sender, EventArgs e)
         {
-            if (editMode) return;
-            if (_useWebView2) return; // WebView2 模式不处理滚动
+            if (editMode || _isCardEditingMode) return;
 
             bool needRedraw = false;
             float speed = appConfig.ScrollSpeed * 0.05f;
             float epsilon = 0.01f;
-            for (int i = 0; i < gridRects.Count && i < currentSubjects.Length; i++)
+            var indices = rotationMode ? new List<int> { rotationIndex } : Enumerable.Range(0, appConfig.CustomSubjects.Count).ToList();
+
+            foreach (int i in indices)
             {
-                string subject = currentSubjects[i];
+                string subject = appConfig.CustomSubjects[i];
                 string content = homeworkData.Subjects.ContainsKey(subject) ? homeworkData.Subjects[subject] : "";
                 if (string.IsNullOrWhiteSpace(content)) continue;
 
@@ -2358,220 +2696,87 @@ namespace HomeworkViewer
             if (needRedraw) Invalidate();
         }
 
-        // ------------------------------ 按钮绘制 ------------------------------
-        private void DrawButtons(Graphics g, Rectangle barRect)
+        private float MeasureTextHeight(string text, Font font, int maxWidth) { using (var g = CreateGraphics()) return g.MeasureString(text, font, maxWidth).Height; }
+        private Rectangle GetContentArea(int subjectIndex)
         {
             if (rotationMode)
             {
-                int backY = barRect.Top + (barRect.Height - BTN_SQUARE_SIZE) / 2;
-                backBtnRect = new Rectangle(35, backY, BTN_SQUARE_SIZE, BTN_SQUARE_SIZE);
-                DrawWin11Button(g, backBtnRect, "返回", buttonIcons.ContainsKey("返回") ? buttonIcons["返回"] : null, ref backBtnRect, backBtnRect.Location, _backPressed, "back");
-
-                int btnY = barRect.Top + (barRect.Height - BTN_SQUARE_SIZE) / 2;
-                int totalButtonsWidth = 3 * BTN_SQUARE_SIZE + 2 * 10;
-                int startX = barRect.Right - totalButtonsWidth - 20;
-
-                Point editPos = new Point(startX, btnY);
-                Point historyPos = new Point(editPos.X + BTN_SQUARE_SIZE + 10, btnY);
-                Point fullscreenPos = new Point(historyPos.X + BTN_SQUARE_SIZE + 10, btnY);
-
-                string editText = editMode ? "完成" : "编辑";
-                string editIcon = editMode ? "完成" : "编辑";
-                DrawWin11Button(g, editBtnRect, editText, buttonIcons.ContainsKey(editIcon) ? buttonIcons[editIcon] : null, ref editBtnRect, editPos, _editPressed, "edit");
-
-                string historyIcon = historyMode ? "返回" : "历史";
-                DrawWin11Button(g, historyBtnRect, historyMode ? "返回" : "历史", buttonIcons.ContainsKey(historyIcon) ? buttonIcons[historyIcon] : null, ref historyBtnRect, historyPos, _historyPressed, "history");
-
-                string fullscreenIcon = fullscreen ? "缩小" : "全屏";
-                DrawWin11Button(g, fullscreenBtnRect, fullscreen ? "缩小" : "全屏", buttonIcons.ContainsKey(fullscreenIcon) ? buttonIcons[fullscreenIcon] : null, ref fullscreenBtnRect, fullscreenPos, _fullscreenPressed, "fullscreen");
-
-                // 左右箭头已移除
+                var bigRect = new Rectangle(150, 100, 900, 475);
+                return new Rectangle(bigRect.Left + 50, bigRect.Top + 150, bigRect.Width - 100, bigRect.Height - 200);
             }
-            else
-            {
-                bool isWin10 = Environment.OSVersion.Version.Major == 10 && Environment.OSVersion.Version.Minor == 0 && Environment.OSVersion.Version.Build < 22000;
-                int btnY = barRect.Top + (barRect.Height - BTN_SQUARE_SIZE) / 2;
-
-                if (!_buttonsExpanded)
-                {
-                    int totalButtonsWidth = 3 * BTN_SQUARE_SIZE + 2 * 10;
-                    int startX = barRect.Right - totalButtonsWidth - 20;
-                    Point expandPos = new Point(startX, btnY);
-                    Point editPos = new Point(expandPos.X + BTN_SQUARE_SIZE + 10, btnY);
-                    Point thirdPos = new Point(editPos.X + BTN_SQUARE_SIZE + 10, btnY);
-
-                    DrawWin11Button(g, expandBtnRect, "展开", buttonIcons.ContainsKey("展开") ? buttonIcons["展开"] : null, ref expandBtnRect, expandPos, _expandPressed, "expand");
-                    DrawWin11Button(g, editBtnRect, editMode ? "完成" : "编辑", buttonIcons.ContainsKey(editMode ? "完成" : "编辑") ? buttonIcons[editMode ? "完成" : "编辑"] : null, ref editBtnRect, editPos, _editPressed, "edit");
-                    DrawWin11Button(g, fullscreenBtnRect, fullscreen ? "缩小" : "全屏", buttonIcons.ContainsKey(fullscreen ? "缩小" : "全屏") ? buttonIcons[fullscreen ? "缩小" : "全屏"] : null, ref fullscreenBtnRect, thirdPos, _fullscreenPressed, "fullscreen");
-                }
-                else
-                {
-                    int totalButtonsWidth = 9 * BTN_SQUARE_SIZE + 8 * 10;
-                    int startX = barRect.Right - totalButtonsWidth;
-                    Point collapsePos = new Point(startX, btnY);
-                    Point settingsPos = new Point(collapsePos.X + BTN_SQUARE_SIZE + 10, btnY);
-                    Point rotatePos = new Point(settingsPos.X + BTN_SQUARE_SIZE + 10, btnY);
-                    Point exportPos = new Point(rotatePos.X + BTN_SQUARE_SIZE + 10, btnY);
-                    Point editPos = new Point(exportPos.X + BTN_SQUARE_SIZE + 10, btnY);
-                    Point historyPos = new Point(editPos.X + BTN_SQUARE_SIZE + 10, btnY);
-                    Point fullscreenPos = new Point(historyPos.X + BTN_SQUARE_SIZE + 10, btnY);
-                    Point minimizePos = new Point(fullscreenPos.X + BTN_SQUARE_SIZE + 10, btnY);
-                    Point closePos = new Point(minimizePos.X + BTN_SQUARE_SIZE + 10, btnY);
-
-                    DrawWin11Button(g, collapseBtnRect, "收起", buttonIcons.ContainsKey("收起") ? buttonIcons["收起"] : null, ref collapseBtnRect, collapsePos, _collapsePressed, "collapse");
-                    DrawWin11Button(g, settingsBtnRect, "设置", buttonIcons.ContainsKey("设置") ? buttonIcons["设置"] : null, ref settingsBtnRect, settingsPos, _settingsPressed, "settings");
-                    DrawWin11Button(g, rotateBtnRect, "轮换", buttonIcons.ContainsKey("轮换") ? buttonIcons["轮换"] : null, ref rotateBtnRect, rotatePos, _rotatePressed, "rotate");
-                    DrawWin11Button(g, exportBtnRect, "导出", buttonIcons.ContainsKey("导出") ? buttonIcons["导出"] : null, ref exportBtnRect, exportPos, _exportPressed, "export");
-                    DrawWin11Button(g, editBtnRect, editMode ? "完成" : "编辑", buttonIcons.ContainsKey(editMode ? "完成" : "编辑") ? buttonIcons[editMode ? "完成" : "编辑"] : null, ref editBtnRect, editPos, _editPressed, "edit");
-                    DrawWin11Button(g, historyBtnRect, historyMode ? "返回" : "历史", buttonIcons.ContainsKey(historyMode ? "返回" : "历史") ? buttonIcons[historyMode ? "返回" : "历史"] : null, ref historyBtnRect, historyPos, _historyPressed, "history");
-                    DrawWin11Button(g, fullscreenBtnRect, fullscreen ? "缩小" : "全屏", buttonIcons.ContainsKey(fullscreen ? "缩小" : "全屏") ? buttonIcons[fullscreen ? "缩小" : "全屏"] : null, ref fullscreenBtnRect, fullscreenPos, _fullscreenPressed, "fullscreen");
-                    DrawWin11Button(g, minimizeBtnRect, "最小化", buttonIcons.ContainsKey("最小化") ? buttonIcons["最小化"] : null, ref minimizeBtnRect, minimizePos, _minimizePressed, "minimize");
-                    DrawWin11Button(g, closeBtnRect, "关闭", buttonIcons.ContainsKey("关闭") ? buttonIcons["关闭"] : null, ref closeBtnRect, closePos, _closePressed, "close");
-                }
-            }
+            Rectangle rect = GetPageCardRect(subjectIndex);
+            return new Rectangle(rect.Left + 10, rect.Top + 60, rect.Width - 20, rect.Height - 70);
         }
 
-        private void DrawWin11Button(Graphics g, Rectangle rect, string text, Image icon, ref Rectangle targetRect, Point pos, bool pressed, string key)
+        // ------------------------------ 编辑模式属性 ------------------------------
+        private bool EditMode
         {
-            targetRect = new Rectangle(pos, new Size(BTN_SQUARE_SIZE, BTN_SQUARE_SIZE));
-            bool isPressed = _buttonPressed.GetValueOrDefault(key) || pressed;
-
-            float hoverProgress = _buttonHoverProgress.GetValueOrDefault(key, 0);
-
-            int centerX = targetRect.X + targetRect.Width / 2;
-            int centerY = targetRect.Y + targetRect.Height / 2;
-            int maxRadius = targetRect.Width / 2;
-
-            if (hoverProgress > 0)
+            get => editMode;
+            set
             {
-                float radiusGrowth = (float)Math.Pow(hoverProgress, 0.8);
-                for (int i = 0; i < 4; i++)
+                if (editMode != value)
                 {
-                    float radiusFactor = 0.6f + i * 0.15f;
-                    float radius = maxRadius * radiusFactor * radiusGrowth;
-                    int baseAlpha = 25 - i * 10;
-                    if (baseAlpha < 0) baseAlpha = 0;
-                    int alpha = (int)(baseAlpha * hoverProgress);
-                    if (alpha > 0)
+                    editMode = value;
+                    if (editMode)
                     {
-                        using (var brush = new SolidBrush(Color.FromArgb(alpha, 255, 255, 255)))
-                        {
-                            g.FillEllipse(brush, centerX - radius, centerY - radius, radius * 2, radius * 2);
-                        }
+                        CreateTimeComboBoxes();
+                        scrollOffsets.Clear();
+                        scrollPaused.Clear();
+                        pauseStartTime.Clear();
                     }
-                }
-            }
-
-            if (icon != null)
-            {
-                int targetHeight = (int)(targetRect.Height * 0.5);
-                int targetWidth = (int)((float)icon.Width / icon.Height * targetHeight);
-                int iconX = targetRect.Left + (targetRect.Width - targetWidth) / 2;
-                int iconY = targetRect.Top + (targetRect.Height - targetHeight) / 2 - 7;
-                g.DrawImage(icon, iconX, iconY, targetWidth, targetHeight);
-            }
-
-            using (var smallFont = new Font("微软雅黑", 8))
-            {
-                SizeF textSize = g.MeasureString(text, smallFont);
-                float textX = targetRect.Left + (targetRect.Width - textSize.Width) / 2;
-                float textY = targetRect.Bottom - textSize.Height - 1;
-                g.DrawString(text, smallFont, Brushes.White, textX, textY);
-            }
-        }
-
-        private void DrawDefaultArrow(Graphics g, Rectangle rect, bool left)
-        {
-            using (var brush = new SolidBrush(Color.DarkGray))
-            {
-                Point[] points;
-                if (left)
-                    points = new Point[] { new Point(rect.Right, rect.Top), new Point(rect.Right, rect.Bottom), new Point(rect.Left, rect.Top + rect.Height / 2) };
-                else
-                    points = new Point[] { new Point(rect.Left, rect.Top), new Point(rect.Left, rect.Bottom), new Point(rect.Right, rect.Top + rect.Height / 2) };
-                g.FillPolygon(brush, points);
-            }
-        }
-
-        private void DrawImageCentered(Graphics g, Image img, Rectangle container)
-        {
-            float scale = Math.Min((float)container.Width / img.Width, (float)container.Height / img.Height);
-            int w = (int)(img.Width * scale);
-            int h = (int)(img.Height * scale);
-            int x = container.X + (container.Width - w) / 2;
-            int y = container.Y + (container.Height - h) / 2;
-            g.DrawImage(img, x, y, w, h);
-        }
-
-        // ------------------------------ 时间提醒与闪烁 ------------------------------
-        private void CheckEveningClassStates()
-        {
-            if (!appConfig.ShowDueTime || appConfig.EveningClassTimes == null || appConfig.EveningClassTimes.Count == 0)
-            {
-                if (_activeEvenings.Count > 0 || _flashingEvenings.Count > 0 || _grayEvenings.Count > 0)
-                {
-                    _activeEvenings.Clear();
-                    _flashingEvenings.Clear();
-                    _grayEvenings.Clear();
-                    StopFlashingIfNeeded();
+                    else
+                    {
+                        DestroyTimeComboBoxes();
+                        if (editingSubjectIndex != -1) FinishInlineEdit();
+                        scrollOffsets.Clear();
+                        scrollPaused.Clear();
+                        pauseStartTime.Clear();
+                    }
                     Invalidate();
                 }
-                return;
-            }
-
-            DateTime now = DateTime.Now;
-            var newActive = new List<string>();
-            var newFlashing = new List<string>();
-            var newGray = new List<string>();
-
-            for (int i = 0; i < appConfig.EveningClassTimes.Count; i++)
-            {
-                var time = appConfig.EveningClassTimes[i];
-                string eveningName = $"晚修{i + 1}";
-                if (DateTime.TryParse(time.Start, out DateTime start) && DateTime.TryParse(time.End, out DateTime end))
-                {
-                    DateTime startToday = DateTime.Today.Add(start.TimeOfDay);
-                    DateTime endToday = DateTime.Today.Add(end.TimeOfDay);
-                    if (now >= startToday && now < endToday) newActive.Add(eveningName);
-                    else if (now >= endToday.AddMinutes(-2) && now <= endToday.AddMinutes(2)) newFlashing.Add(eveningName);
-                    else if (now > endToday.AddMinutes(2)) newGray.Add(eveningName);
-                }
-            }
-
-            bool changed = !_activeEvenings.SequenceEqual(newActive) || !_flashingEvenings.SequenceEqual(newFlashing) || !_grayEvenings.SequenceEqual(newGray);
-            if (changed)
-            {
-                _activeEvenings = newActive;
-                _flashingEvenings = newFlashing;
-                _grayEvenings = newGray;
-                if (_flashingEvenings.Count > 0 && !_debugFlashing) StartFlashing();
-                else if (_flashingEvenings.Count == 0 && !_debugFlashing) StopFlashingIfNeeded();
-                Invalidate();
             }
         }
 
-        private void StartFlashing() { if (!flashTimer.Enabled) { flashStartTime = DateTime.Now; flashTimer.Start(); } }
-        private void StopFlashingIfNeeded() { if (_flashingEvenings.Count == 0 && !_debugFlashing) { flashTimer.Stop(); Invalidate(); } }
-        private void FlashTimer_Tick(object sender, EventArgs e)
+        private void FinishInlineEdit()
         {
-            if (_debugFlashing && (DateTime.Now - _debugFlashStartTime).TotalSeconds > FLASH_DURATION) { _debugFlashing = false; StopFlashingIfNeeded(); }
-            double angle = (DateTime.Now - flashStartTime).TotalMilliseconds / 500.0;
-            flashStep = (int)((Math.Sin(angle) + 1) * 60);
-            _laserOffset += 0.1f;
-            if (_laserOffset >= 1f) _laserOffset -= 1f;
+            if (editingSubjectIndex == -1 || inlineEditControl == null) return;
+            TextBox textBox = inlineEditControl as TextBox;
+            if (textBox != null)
+            {
+                textBox.LostFocus -= InlineEdit_LostFocus;
+                textBox.KeyDown -= InlineEdit_KeyDown;
+                string subject = appConfig.CustomSubjects[editingSubjectIndex];
+                homeworkData.Subjects[subject] = textBox.Text;
+                SaveHomeworkData();
+            }
+            Controls.Remove(inlineEditControl);
+            inlineEditControl.Dispose();
+            inlineEditControl = null;
+            editingSubjectIndex = -1;
+            currentEditType = EditFieldType.None;
             Invalidate();
         }
-        public void StartDebugFlashing() { _debugFlashing = true; _debugFlashStartTime = DateTime.Now; StartFlashing(); Invalidate(); }
-        public void StopDebugFlashing() { _debugFlashing = false; StopFlashingIfNeeded(); }
+
+        private void CancelInlineEdit()
+        {
+            if (editingSubjectIndex == -1 || inlineEditControl == null) return;
+            Controls.Remove(inlineEditControl);
+            inlineEditControl.Dispose();
+            inlineEditControl = null;
+            editingSubjectIndex = -1;
+            currentEditType = EditFieldType.None;
+            Invalidate();
+        }
 
         // ------------------------------ 提交时间下拉框管理 ------------------------------
         private void CreateTimeComboBoxes()
         {
             DestroyTimeComboBoxes();
-            for (int i = 0; i < gridRects.Count && i < currentSubjects.Length; i++)
+            for (int i = 0; i < appConfig.CustomSubjects.Count; i++)
             {
-                string subject = currentSubjects[i];
+                string subject = appConfig.CustomSubjects[i];
                 Rectangle virtualRect = GetDueTimeRect(i);
+                if (virtualRect.IsEmpty) continue;
                 Point screenLoc = MapToScreen(virtualRect.Location);
                 Size screenSize = new Size((int)(virtualRect.Width * scaleFactor), (int)(virtualRect.Height * scaleFactor));
                 string currentValue = homeworkData.DueTimes.ContainsKey(subject) ? homeworkData.DueTimes[subject] : "";
@@ -2630,7 +2835,7 @@ namespace HomeworkViewer
         {
             var combo = sender as ComboBox;
             int subjectIndex = (int)combo.Tag;
-            string subject = currentSubjects[subjectIndex];
+            string subject = appConfig.CustomSubjects[subjectIndex];
             homeworkData.DueTimes[subject] = combo.SelectedItem?.ToString() ?? "";
             SaveHomeworkData();
         }
@@ -2676,104 +2881,9 @@ namespace HomeworkViewer
             if (EditMode && !rotationMode && !IsDisposed)
             {
                 CreateTimeComboBoxes();
-                // 编辑模式下纯文本编辑框已在 EditMode setter 中创建，此处不需要重复创建
-            }
-            else if (!EditMode && !rotationMode)
-            {
-                if (_useWebView2)
-                {
-                    if (cardWebViews.Count == 0)
-                        RecreateWebView2ForGrid();
-                    else
-                        UpdateWebView2Positions();
-                }
-                // GDI+ 模式无需重建，重绘即可
-            }
-            else if (rotationMode && _useWebView2)
-            {
-                if (rotationWebView == null)
-                    CreateRotationWebView();
-                else
-                    UpdateWebView2Positions();
             }
         }
 
-        // ------------------------------ 卡片飞入动画 ------------------------------
-        private void StartCardFlyInAnimation()
-        {
-            _isFlyingIn = true;
-            _suspendMouseGlow = true;
-            _mouseGlowAlpha = 0;
-            Invalidate();
-
-            _cardAnimations.Clear();
-            int cols = 3;
-            double totalDelay = 0.5;
-            double colDelay = 0.12;
-            double duration = 0.45;
-
-            _flyInAnimationsRemaining = gridRects.Count;
-
-            for (int i = 0; i < gridRects.Count; i++)
-            {
-                int col = i % cols;
-                int row = i / cols;
-                double delay = totalDelay + col * colDelay + row * 0.02;
-
-                var anim = new Animation
-                {
-                    Duration = TimeSpan.FromSeconds(duration),
-                    StartDelay = TimeSpan.FromSeconds(delay),
-                    Tag = i
-                };
-                int index = i;
-                anim.OnUpdate = (p) =>
-                {
-                    if (index < gridRects.Count)
-                        Invalidate(gridRects[index]);
-                };
-                anim.OnComplete = () =>
-                {
-                    _flyInAnimationsRemaining--;
-                    if (_flyInAnimationsRemaining == 0)
-                    {
-                        _isFlyingIn = false;
-                        _suspendMouseGlow = false;
-                        if (!_isWin10)
-                        {
-                            var fadeIn = new Animation
-                            {
-                                Duration = TimeSpan.FromMilliseconds(500),
-                                Tag = "mouseGlowFadeIn"
-                            };
-                            fadeIn.OnUpdate = (p) =>
-                            {
-                                _mouseGlowAlpha = (float)p;
-                                Invalidate();
-                            };
-                            fadeIn.OnComplete = () =>
-                            {
-                                _mouseGlowAlpha = 1;
-                                _mouseGlowFadeAnimation = null;
-                                Invalidate();
-                            };
-                            fadeIn.Start();
-                            _animations.Add(fadeIn);
-                            _mouseGlowFadeAnimation = fadeIn;
-                        }
-                        else
-                        {
-                            _mouseGlowAlpha = 0;
-                        }
-                    }
-                };
-                anim.Start();
-                _cardAnimations[index] = anim;
-                _animations.Add(anim);
-            }
-        }
-
-        // ------------------------------ 窗体生命周期 ------------------------------
         private void OnLoad(object sender, EventArgs e)
         {
             ApplyBackgroundEffect(appConfig.BackgroundEffect);
@@ -2794,27 +2904,7 @@ namespace HomeworkViewer
             }
 
             InitializeDrawerPanel();
-            StartCardFlyInAnimation();
-
-            // 初始化时，若为 WebView2 模式且未初始化，等待初始化完成后刷新内容
-            if (_useWebView2)
-            {
-                _ = Task.Run(async () =>
-                {
-                    while (!webView2Initialized)
-                        await Task.Delay(100);
-                    this.Invoke((MethodInvoker)(() =>
-                    {
-                        if (!rotationMode && !EditMode)
-                            RefreshAllWebView2Content();
-                    }));
-                });
-            }
-            else
-            {
-                // GDI+ 模式：直接触发重绘
-                Invalidate();
-            }
+            StartCardFlyInAnimation(1);
         }
 
         private void OnFormClosing(object sender, FormClosingEventArgs e) { }
@@ -2825,21 +2915,510 @@ namespace HomeworkViewer
             flashTimer?.Dispose();
             scrollTimer?.Dispose();
             _animationTimer?.Dispose();
+            _autoPageTimer?.Dispose();
+            _shakeTimer?.Dispose();
             font12?.Dispose(); font20?.Dispose(); font24?.Dispose(); font30?.Dispose(); font22?.Dispose(); font36?.Dispose();
             hintFont?.Dispose(); buttonFont?.Dispose(); fontSmall?.Dispose();
             RED_SEMI?.Dispose(); ORANGE_SEMI?.Dispose(); GREEN_SEMI?.Dispose(); BLUE_SEMI?.Dispose(); PURPLE_SEMI?.Dispose(); DARKORANGE_SEMI?.Dispose();
-            DestroyAllWebView2();
-            DestroyPlainTextEditors();
             base.OnFormClosed(e);
+        }
+
+        private void OnMouseClick(object sender, MouseEventArgs e)
+        {
+            Point v = MapToVirtual(e.Location);
+            int x = v.X, y = v.Y;
+
+            if (_drawerOpen && _drawerPanel != null && !_drawerPanel.Bounds.Contains(e.Location))
+            {
+                CloseDrawer();
+            }
+
+            if (editingSubjectIndex != -1) FinishInlineEdit();
+
+            if (rotationMode)
+            {
+                if (backBtnRect.Contains(x, y))
+                {
+                    rotationMode = false;
+                    rotationTimer.Stop();
+                    StartCardFlyInAnimation(1);
+                    Invalidate();
+                }
+                else if (leftArrowRect.Contains(x, y))
+                {
+                    RotateManual(-1);
+                }
+                else if (rightArrowRect.Contains(x, y))
+                {
+                    RotateManual(1);
+                }
+                else if (fullscreenBtnRect.Contains(x, y))
+                {
+                    if (EditMode) EditMode = false;
+                    ToggleFullscreen();
+                }
+            }
+            else
+            {
+                if (!_buttonsExpanded)
+                {
+                    if (expandBtnRect.Contains(x, y))
+                    {
+                        _buttonsExpanded = true;
+                        Invalidate();
+                        return;
+                    }
+                    else if (editBtnRect.Contains(x, y))
+                    {
+                        if (EditMode) SaveHomeworkData();
+                        EditMode = !EditMode;
+                        return;
+                    }
+                    else if (fullscreenBtnRect.Contains(x, y))
+                    {
+                        if (EditMode) EditMode = false;
+                        ToggleFullscreen();
+                        return;
+                    }
+                    else if (minimizeBtnRect.Contains(x, y))
+                    {
+                        WindowState = FormWindowState.Minimized;
+                        return;
+                    }
+                }
+                else
+                {
+                    if (_isCardEditingMode)
+                    {
+                        if (manageBtnRect.Contains(x, y))
+                        {
+                            ExitCardEditMode();
+                            return;
+                        }
+                        // 顶部栏“添加卡片”按钮
+                        if (addCardBtnRect.Contains(x, y))
+                        {
+                            AddNewCard();
+                            return;
+                        }
+                    }
+                    else
+                    {
+                        if (collapseBtnRect.Contains(x, y))
+                        {
+                            _buttonsExpanded = false;
+                            Invalidate();
+                            return;
+                        }
+                        else if (settingsBtnRect.Contains(x, y))
+                        {
+                            using (var settingsForm = new SettingsForm(this))
+                            {
+                                settingsForm.ShowDialog();
+                            }
+                            return;
+                        }
+                        else if (rotateBtnRect.Contains(x, y))
+                        {
+                            bool hasContent = appConfig.CustomSubjects.Any(subj => homeworkData.Subjects.ContainsKey(subj) && !string.IsNullOrWhiteSpace(homeworkData.Subjects[subj]));
+                            if (!hasContent)
+                            {
+                                MessageBox.Show("所有科目都没有作业内容，无法进入轮播模式", "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                                return;
+                            }
+                            rotationMode = true;
+                            rotationIndex = 0;
+                            rotationTimer.Start();
+                            Invalidate();
+                            return;
+                        }
+                        else if (manageBtnRect.Contains(x, y))
+                        {
+                            if (EditMode) EditMode = false;
+                            if (rotationMode) { rotationMode = false; rotationTimer.Stop(); }
+                            if (historyMode) { historyMode = false; historyDate = null; LoadHomeworkData(currentDate); }
+                            if (editingSubjectIndex != -1) FinishInlineEdit();
+                            EnterCardEditMode();
+                            Invalidate();
+                            return;
+                        }
+                        else if (exportBtnRect.Contains(x, y))
+                        {
+                            ShowExportDialog();
+                            return;
+                        }
+                        else if (editBtnRect.Contains(x, y))
+                        {
+                            if (EditMode) SaveHomeworkData();
+                            EditMode = !EditMode;
+                            return;
+                        }
+                        else if (historyBtnRect.Contains(x, y))
+                        {
+                            if (historyMode)
+                            {
+                                historyMode = false;
+                                historyDate = null;
+                                LoadHomeworkData(currentDate);
+                                Invalidate();
+                            }
+                            else
+                            {
+                                using (var dlg = new HistoryDialog())
+                                {
+                                    if (dlg.ShowDialog(this) == DialogResult.OK && dlg.SelectedDate.HasValue)
+                                    {
+                                        historyDate = dlg.SelectedDate.Value;
+                                        LoadHomeworkData(historyDate.Value);
+                                        historyMode = true;
+                                        Invalidate();
+                                    }
+                                }
+                            }
+                            return;
+                        }
+                        else if (minimizeBtnRect.Contains(x, y))
+                        {
+                            WindowState = FormWindowState.Minimized;
+                            return;
+                        }
+                        else if (closeBtnRect.Contains(x, y))
+                        {
+                            Application.Exit();
+                            return;
+                        }
+                        else if (fullscreenBtnRect.Contains(x, y))
+                        {
+                            if (EditMode) EditMode = false;
+                            ToggleFullscreen();
+                            return;
+                        }
+                    }
+                }
+
+                // 分页箭头（注意 TotalPages 属性已替换 _totalPages）
+                if (TotalPages > 1)
+                {
+                    int arrowSize = 40;
+                    Rectangle leftArrow = new Rectangle(20, VIRTUAL_SIZE.Height / 2 - arrowSize / 2, arrowSize, arrowSize);
+                    Rectangle rightArrow = new Rectangle(VIRTUAL_SIZE.Width - 20 - arrowSize, VIRTUAL_SIZE.Height / 2 - arrowSize / 2, arrowSize, arrowSize);
+                    if (leftArrow.Contains(x, y) && leftArrowImage != null)
+                    {
+                        int newPage = (_currentPage - 1 + TotalPages) % TotalPages;
+                        SwitchToPage(newPage, 1);
+                        return;
+                    }
+                    if (rightArrow.Contains(x, y) && rightArrowImage != null)
+                    {
+                        int newPage = (_currentPage + 1) % TotalPages;
+                        SwitchToPage(newPage, -1);
+                        return;
+                    }
+                }
+
+                // 卡片管理模式下处理删除按钮、科目名称编辑、虚拟添加卡片
+                if (_isCardEditingMode && !rotationMode)
+                {
+                    // 删除按钮
+                    for (int i = 0; i < _deleteButtonRects.Count; i++)
+                    {
+                        if (_deleteButtonRects[i].Contains(x, y))
+                        {
+                            int cardIdx = (_currentPage * CARDS_PER_PAGE) + i;
+                            if (cardIdx >= 0 && cardIdx < appConfig.CustomSubjects.Count)
+                                DeleteCard(cardIdx);
+                            return;
+                        }
+                    }
+
+                    // 科目名称内联编辑
+                    List<Rectangle> pageRects = GetPageGridRects();
+                    int baseIndex = _currentPage * CARDS_PER_PAGE;
+                    for (int i = 0; i < pageRects.Count; i++)
+                    {
+                        int cardIndex = baseIndex + i;
+                        if (cardIndex >= appConfig.CustomSubjects.Count) break;
+                        Rectangle rect = pageRects[i];
+                        Font subjectFont = font22;
+                        int topOffset = 50;
+                        Rectangle nameRect = new Rectangle(rect.Left + 10, rect.Top + topOffset - subjectFont.Height, rect.Width - 20, subjectFont.Height);
+                        if (nameRect.Contains(x, y))
+                        {
+                            StartInlineEditForSubjectName(cardIndex, nameRect);
+                            return;
+                        }
+                    }
+
+                    // 虚拟添加卡片区域（包括当前页空位和虚拟页）
+                    if (_virtualAddCardRect.Contains(x, y))
+                    {
+                        AddNewCard();
+                        return;
+                    }
+                }
+
+                // 常规编辑模式（作业内容编辑）
+                if (EditMode && !rotationMode && !_isCardEditingMode)
+                {
+                    List<Rectangle> pageRects = GetPageGridRects();
+                    int startIndex = _currentPage * CARDS_PER_PAGE;
+                    for (int i = 0; i < pageRects.Count; i++)
+                    {
+                        int cardIndex = startIndex + i;
+                        if (cardIndex >= appConfig.CustomSubjects.Count) break;
+                        Rectangle rect = pageRects[i];
+                        Rectangle subjectArea = new Rectangle(rect.Left + 10, rect.Top + 60, rect.Width - 20, rect.Height - 70);
+                        if (subjectArea.Contains(x, y))
+                        {
+                            if (!ManagementHelper.CanEdit(appConfig))
+                            {
+                                MessageBox.Show("当前已由管理端控制，无法编辑作业。", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                                return;
+                            }
+                            StartInlineEdit(cardIndex, EditFieldType.Subject, subjectArea);
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        private void StartInlineEdit(int subjectIndex, EditFieldType fieldType, Rectangle fieldRect)
+        {
+            if (editingSubjectIndex != -1) FinishInlineEdit();
+            editingSubjectIndex = subjectIndex;
+            currentEditType = fieldType;
+
+            string subject = appConfig.CustomSubjects[subjectIndex];
+            Point screenLoc = MapToScreen(fieldRect.Location);
+            Size screenSize = new Size((int)(fieldRect.Width * scaleFactor), (int)(fieldRect.Height * scaleFactor));
+
+            string currentText = homeworkData.Subjects.ContainsKey(subject) ? homeworkData.Subjects[subject] : "";
+            Font editFont = font30;
+            if (fullscreen)
+            {
+                int newLevel = appConfig.FontSizeLevel + 1;
+                if (newLevel > 2) newLevel = 2;
+                float scale = fontScales[newLevel];
+                editFont = new Font("微软雅黑", 20 * scale);
+            }
+
+            var textBox = new TextBox
+            {
+                Multiline = true,
+                WordWrap = true,
+                ScrollBars = ScrollBars.Vertical,
+                Location = screenLoc,
+                Size = screenSize,
+                Text = currentText,
+                Font = editFont,
+                BorderStyle = BorderStyle.FixedSingle,
+                BackColor = Color.FromArgb(40, 40, 40),
+                ForeColor = Color.White
+            };
+            textBox.LostFocus += InlineEdit_LostFocus;
+            textBox.KeyDown += InlineEdit_KeyDown;
+            inlineEditControl = textBox;
+            Controls.Add(inlineEditControl);
+            inlineEditControl.Focus();
+        }
+
+        private void InlineEdit_LostFocus(object sender, EventArgs e) => FinishInlineEdit();
+
+        private void InlineEdit_KeyDown(object sender, KeyEventArgs e)
+        {
+            if (e.KeyCode == Keys.Enter && e.Control) { e.SuppressKeyPress = true; FinishInlineEdit(); }
+            else if (e.KeyCode == Keys.Escape) { e.SuppressKeyPress = true; CancelInlineEdit(); }
+        }
+
+        private void StartInlineEditForSubjectName(int subjectIndex, Rectangle nameRect)
+        {
+            if (editingSubjectIndex != -1) FinishInlineEdit();
+            editingSubjectIndex = subjectIndex;
+            currentEditType = EditFieldType.Subject;
+
+            string currentName = appConfig.CustomSubjects[subjectIndex];
+            Point screenLoc = MapToScreen(nameRect.Location);
+            Size screenSize = new Size((int)(nameRect.Width * scaleFactor), (int)(nameRect.Height * scaleFactor));
+
+            var textBox = new TextBox
+            {
+                Location = screenLoc,
+                Size = screenSize,
+                Text = currentName,
+                Font = font22,
+                BorderStyle = BorderStyle.FixedSingle,
+                BackColor = Color.FromArgb(40, 40, 40),
+                ForeColor = Color.White
+            };
+            textBox.LostFocus += (s, ev) => FinishEditingSubjectName();
+            textBox.KeyDown += (s, ev) =>
+            {
+                if (ev.KeyCode == Keys.Enter)
+                {
+                    FinishEditingSubjectName();
+                    ev.SuppressKeyPress = true;
+                }
+                else if (ev.KeyCode == Keys.Escape)
+                {
+                    CancelEditingSubjectName();
+                    ev.SuppressKeyPress = true;
+                }
+            };
+            inlineEditControl = textBox;
+            Controls.Add(inlineEditControl);
+            inlineEditControl.Focus();
+        }
+
+        private void FinishEditingSubjectName()
+        {
+            if (_isCleaningUp) return;
+            if (editingSubjectIndex == -1 || inlineEditControl == null) return;
+            _isCleaningUp = true;
+            TextBox textBox = inlineEditControl as TextBox;
+            string newName = textBox.Text.Trim();
+            if (!string.IsNullOrEmpty(newName) && newName != appConfig.CustomSubjects[editingSubjectIndex])
+            {
+                CleanupSubjectEdit();
+                RenameCard(editingSubjectIndex, newName);
+            }
+            else
+            {
+                CleanupSubjectEdit();
+            }
+            _isCleaningUp = false;
+        }
+
+        private void CancelEditingSubjectName()
+        {
+            if (_isCleaningUp) return;
+            if (editingSubjectIndex == -1 || inlineEditControl == null) return;
+            _isCleaningUp = true;
+            CleanupSubjectEdit();
+            _isCleaningUp = false;
+        }
+
+        private void CleanupSubjectEdit()
+        {
+            if (inlineEditControl != null)
+            {
+                Controls.Remove(inlineEditControl);
+                inlineEditControl.Dispose();
+                inlineEditControl = null;
+            }
+            editingSubjectIndex = -1;
+            currentEditType = EditFieldType.None;
+            Invalidate();
         }
 
         private void ShowExportDialog()
         {
-            // 导出对话框实现（可保留原有逻辑）
+            Form exportDlg = new Form()
+            {
+                Text = "导出作业",
+                Size = new Size(400, 220),
+                StartPosition = FormStartPosition.CenterParent,
+                FormBorderStyle = FormBorderStyle.FixedDialog,
+                MaximizeBox = false,
+                MinimizeBox = false,
+                BackColor = Color.FromArgb(45, 45, 48),
+                ForeColor = Color.White
+            };
+
+            Label lblFormat = new Label() { Text = "导出格式：", Location = new Point(20, 20), AutoSize = true, ForeColor = Color.White };
+            ComboBox cmbFormat = new ComboBox()
+            {
+                DropDownStyle = ComboBoxStyle.DropDownList,
+                Location = new Point(120, 17),
+                Width = 120,
+                BackColor = Color.FromArgb(64, 64, 64),
+                ForeColor = Color.White,
+                FlatStyle = FlatStyle.Flat
+            };
+            cmbFormat.Items.AddRange(new object[] { "TXT 文本文件 (*.txt)", "HTML 网页文件 (*.html)", "JPG 图片 (*.jpg)" });
+            cmbFormat.SelectedIndex = 0;
+
+            Button btnOK = new Button()
+            {
+                Text = "导出",
+                Location = new Point(180, 130),
+                Size = new Size(80, 30),
+                BackColor = Color.FromArgb(64, 64, 64),
+                ForeColor = Color.White,
+                FlatStyle = FlatStyle.Flat
+            };
+            Button btnCancel = new Button()
+            {
+                Text = "取消",
+                Location = new Point(280, 130),
+                Size = new Size(80, 30),
+                BackColor = Color.FromArgb(64, 64, 64),
+                ForeColor = Color.White,
+                FlatStyle = FlatStyle.Flat
+            };
+
+            exportDlg.Controls.Add(lblFormat);
+            exportDlg.Controls.Add(cmbFormat);
+            exportDlg.Controls.Add(btnOK);
+            exportDlg.Controls.Add(btnCancel);
+
+            btnOK.Click += (s, e) =>
+            {
+                string selected = cmbFormat.SelectedItem.ToString();
+                string filter = "";
+                string extension = "";
+                if (selected.StartsWith("TXT")) { filter = "文本文件|*.txt"; extension = ".txt"; }
+                else if (selected.StartsWith("HTML")) { filter = "网页文件|*.html"; extension = ".html"; }
+                else if (selected.StartsWith("JPG")) { filter = "图片文件|*.jpg"; extension = ".jpg"; }
+
+                SaveFileDialog sfd = new SaveFileDialog()
+                {
+                    Title = "保存导出文件",
+                    Filter = filter,
+                    DefaultExt = extension,
+                    FileName = $"作业_{currentDate:yyyyMMdd}"
+                };
+
+                if (sfd.ShowDialog() == DialogResult.OK)
+                {
+                    string filePath = sfd.FileName;
+                    try
+                    {
+                        DateTime exportDate = historyMode && historyDate.HasValue ? historyDate.Value : currentDate;
+                        if (selected.StartsWith("TXT"))
+                        {
+                            ExportHelper.ExportToTxt(homeworkData, exportDate, filePath, false);
+                            MessageBox.Show($"导出成功：{filePath}", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                        }
+                        else if (selected.StartsWith("HTML"))
+                        {
+                            ExportHelper.ExportToHtml(homeworkData, exportDate, filePath, false);
+                            MessageBox.Show($"导出成功：{filePath}", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                        }
+                        else if (selected.StartsWith("JPG"))
+                        {
+                            bool wasEditMode = EditMode;
+                            if (wasEditMode) EditMode = false;
+                            Application.DoEvents();
+                            ExportHelper.ExportToJpg(this, filePath);
+                            if (wasEditMode) EditMode = true;
+                            MessageBox.Show($"导出成功：{filePath}", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                        }
+                        exportDlg.Close();
+                    }
+                    catch (Exception ex)
+                    {
+                        MessageBox.Show($"导出失败：{ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    }
+                }
+            };
+            btnCancel.Click += (s, e) => exportDlg.Close();
+            exportDlg.ShowDialog(this);
         }
+
+        private List<ComboBox> timeComboBoxes = new List<ComboBox>();
     }
 
-    // ------------------------------ 动画类 ------------------------------
     public class Animation
     {
         public double Progress { get; set; } = 0;

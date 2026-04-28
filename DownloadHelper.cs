@@ -1,5 +1,3 @@
-// Copyright (c) 2026 MaxSui 隋修梁. All rights reserved.
-// Licensed under the GPL3.0 License. See LICENSE in the project root for license information.
 #nullable disable
 using System;
 using System.Collections.Generic;
@@ -89,7 +87,6 @@ namespace HomeworkViewer
         {
             if (assets == null || assets.Count == 0) return null;
 
-            // 简单匹配：优先选择包含 windows/win 且扩展名为 .exe/.msi 的文件
             var candidates = assets.Where(a =>
             {
                 string name = a.Name.ToLower();
@@ -174,7 +171,6 @@ namespace HomeworkViewer
                         }
                     }
 
-                    // 哈希校验
                     if (!string.IsNullOrEmpty(expectedHash))
                     {
                         string actualHash = await Task.Run(() => ComputeSHA256(localPath));
@@ -188,7 +184,6 @@ namespace HomeworkViewer
                 }
                 catch (HttpRequestException ex) when (mirroredUrl != downloadUrl)
                 {
-                    // 镜像失败，回退到原始URL
                     mirroredUrl = downloadUrl;
                     lastException = ex;
                     retry++;

@@ -1,5 +1,3 @@
-// Copyright (c) 2026 MaxSui 隋修梁. All rights reserved.
-// Licensed under the GPL3.0 License. See LICENSE in the project root for license information.
 #nullable disable
 using System;
 using System.Collections.Generic;
@@ -72,10 +70,8 @@ namespace HomeworkViewer
             try
             {
                 var startTime = DateTime.Now;
-
                 var request = new HttpRequestMessage(HttpMethod.Head, mirror);
                 var response = await _httpClient.SendAsync(request);
-
                 if (response.IsSuccessStatusCode)
                 {
                     return (int)(DateTime.Now - startTime).TotalMilliseconds;
