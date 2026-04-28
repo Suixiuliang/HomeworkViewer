@@ -1,6 +1,6 @@
 # 作业展板
 
-**首先说一句，本作业展板是为了方便我们班布置作业开发的，可能有一些Bug，欢迎广大 Github 用户们提供 Issues ! **
+__首先说一句，本作业展板是为了方便我们班布置作业开发的，可能有一些Bug，欢迎广大 Github 用户们提供 Issues !__
 
 
 
@@ -8,6 +8,7 @@
 
 ​	这是一个很普通的，支持MD和LaTeX渲染的很普通的轻量级作业展板
 
+### 	功能实现概况
 ### 	功能实现概况
 
 - [x] 基本作业展板功能
@@ -41,6 +42,7 @@
 2. .NET 环境
 
    本项目基于.NET 10.0开发 *(安装包默认自带)*
+   本项目基于.NET 10.0开发 *(安装包默认自带)*
 
 ## 2.安装说明
 
@@ -58,6 +60,10 @@
 ## 4.安装包下载
 
 ​	请前往右侧Release界面下载。如果网速太慢无法下载或镜像站断连，这里提供国内网盘分流下载：
+
+- 百度网盘:                [点击跳转(提取码：HMVR)](https://pan.baidu.com/s/1TV1pfbkBc7SOnihFnfX2AA?pwd=HMVR)
+- 123网盘:                 [点击跳转(提取码：HMVR)](https://www.123912.com/s/iNAgTd-9PD23?pwd=HMVR#)
+- Huang1111网盘:     [点击跳转(提取码：HMVR)](https://pan.huang1111.cn/s/jRAldIy)
 
 - 百度网盘:                [点击跳转(提取码：HMVR)](https://pan.baidu.com/s/1TV1pfbkBc7SOnihFnfX2AA?pwd=HMVR)
 - 123网盘:                 [点击跳转(提取码：HMVR)](https://www.123912.com/s/iNAgTd-9PD23?pwd=HMVR#)
