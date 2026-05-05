@@ -1,7 +1,7 @@
 {
-  "Version": "2.1.0",
+  "Version": "2.2.0",
   "ReleaseType": "Stable",
   "IsMandatory": "1",
-  "Hash": "sha256:5e1362b634ff00462fa1f942c98bf0f5c4e95ede74608ba6fd238e49ae470ac4",
-  "DownloadUrl": "https://github.com/Suixiuliang/HomeworkViewer/releases/download/v2.1.0-stable/HomeworkViewer.exe"
+  "Hash": "sha256:0ab2d23f309fc3225f31eee736179bfa2998bd8b17121fc73fc0ea4a266cb56a",
+  "DownloadUrl": "https://github.com/Suixiuliang/HomeworkViewer/releases/download/v2.2.0-stable/HomeworkViewer.exe"
 }
