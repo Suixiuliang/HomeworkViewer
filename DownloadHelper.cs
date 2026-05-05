@@ -34,12 +34,19 @@ namespace HomeworkViewer
         private readonly HttpClient _httpClient;
         private readonly MirrorManager _mirrorManager;
         private readonly string _tempPath;
+        public bool UseMirror { get; set; } = true;  // 是否启用镜像加速
 
         public DownloadHelper()
         {
-            _httpClient = new HttpClient();
-            _httpClient.Timeout = TimeSpan.FromMinutes(10);
+            var handler = new HttpClientHandler
+            {
+                AllowAutoRedirect = true,           // 自动跟随重定向
+                MaxAutomaticRedirections = 5
+            };
+            _httpClient = new HttpClient(handler);
+            _httpClient.Timeout = TimeSpan.FromMinutes(5);
             _httpClient.DefaultRequestHeaders.Add("User-Agent", "HomeworkViewer-Updater");
+            _httpClient.DefaultRequestHeaders.Add("Accept", "application/octet-stream, */*");
 
             _mirrorManager = new MirrorManager();
 
@@ -49,6 +56,26 @@ namespace HomeworkViewer
             {
                 Directory.CreateDirectory(_tempPath);
             }
+        }
+
+        /// <summary>
+        /// 修正常见的错误下载链接（将 /tag/ 替换为 /download/）
+        /// </summary>
+        private string FixDownloadUrl(string url)
+        {
+            if (string.IsNullOrEmpty(url)) return url;
+            // 例如: https://github.com/owner/repo/releases/tag/v1.0/file.exe
+            // 应该改为: https://github.com/owner/repo/releases/download/v1.0/file.exe
+            if (url.Contains("/releases/tag/"))
+            {
+                url = url.Replace("/releases/tag/", "/releases/download/");
+                // 确保末尾有文件名（如果没有，尝试从 URL 最后一段提取）
+                if (url.EndsWith("/"))
+                {
+                    // 不合理，保持原样
+                }
+            }
+            return url;
         }
 
         public async Task<List<ReleaseAsset>> GetLatestReleaseAssetsAsync(string owner, string repo)
@@ -100,23 +127,63 @@ namespace HomeworkViewer
             return candidates.OrderByDescending(a => a.Name.Length).FirstOrDefault();
         }
 
+        /// <summary>
+        /// 下载文件，支持镜像、HEAD预检、大小检查、哈希校验
+        /// </summary>
         public async Task<string> DownloadFileAsync(string downloadUrl, string fileName, string expectedHash = null, IProgress<DownloadProgressInfo> progress = null)
         {
+            // 修复 URL（如果用户错误地使用了 /tag/ 链接）
+            downloadUrl = FixDownloadUrl(downloadUrl);
             string localPath = Path.Combine(_tempPath, fileName);
             if (File.Exists(localPath)) try { File.Delete(localPath); } catch { }
 
-            string mirroredUrl = await _mirrorManager.GetMirroredUrlAsync(downloadUrl);
-            int retry = 0;
-            Exception lastException = null;
-
-            while (retry < 3)
+            // 构建尝试的 URL 列表（先镜像，后原始）
+            List<string> urlsToTry = new List<string>();
+            if (UseMirror)
             {
                 try
                 {
-                    using (var response = await _httpClient.GetAsync(mirroredUrl, HttpCompletionOption.ResponseHeadersRead))
+                    string mirroredUrl = await _mirrorManager.GetMirroredUrlAsync(downloadUrl);
+                    urlsToTry.Add(mirroredUrl);
+                }
+                catch { /* 忽略镜像获取失败 */ }
+            }
+            urlsToTry.Add(downloadUrl); // 最后原始 URL
+
+            Exception lastException = null;
+
+            for (int attempt = 0; attempt < urlsToTry.Count; attempt++)
+            {
+                string currentUrl = urlsToTry[attempt];
+                try
+                {
+                    // 1. HEAD 请求预检（验证 URL 是否有效，内容类型是否合理）
+                    using (var headRequest = new HttpRequestMessage(HttpMethod.Head, currentUrl))
+                    using (var headResponse = await _httpClient.SendAsync(headRequest))
+                    {
+                        if (!headResponse.IsSuccessStatusCode)
+                        {
+                            throw new HttpRequestException($"HEAD 请求失败: {(int)headResponse.StatusCode} {headResponse.ReasonPhrase}");
+                        }
+
+                        string contentType = headResponse.Content.Headers.ContentType?.MediaType ?? "";
+                        long contentLength = headResponse.Content.Headers.ContentLength ?? -1;
+
+                        // 如果内容类型是 HTML 或文件极小（< 500KB），认为是错误页面或重定向页
+                        if (contentType.Contains("html") || (contentLength > 0 && contentLength < 500 * 1024))
+                        {
+                            throw new Exception($"无效响应: Content-Type={contentType}, 大小={contentLength} 字节，可能并非真实文件");
+                        }
+
+                        // 可选：如果是 GitHub 的下载链接，最终重定向后的 Content-Length 应该与 Release 中的 Size 匹配
+                    }
+
+                    // 2. 实际下载（支持进度报告）
+                    using (var response = await _httpClient.GetAsync(currentUrl, HttpCompletionOption.ResponseHeadersRead))
                     {
                         response.EnsureSuccessStatusCode();
                         long totalBytes = response.Content.Headers.ContentLength ?? -1;
+
                         using (var contentStream = await response.Content.ReadAsStreamAsync())
                         using (var fileStream = new FileStream(localPath, FileMode.Create, FileAccess.Write, FileShare.None, 8192, true))
                         {
@@ -137,18 +204,8 @@ namespace HomeworkViewer
                                     if ((now - lastReportTime).TotalMilliseconds >= 100)
                                     {
                                         int percentage = (int)((totalRead * 100) / totalBytes);
-                                        double speedKBps = 0;
-                                        TimeSpan timeRemaining = TimeSpan.Zero;
-                                        if (lastReportBytes > 0)
-                                        {
-                                            double bytesPerSec = (totalRead - lastReportBytes) / (now - lastReportTime).TotalSeconds;
-                                            speedKBps = bytesPerSec / 1024.0;
-                                            if (speedKBps > 0)
-                                            {
-                                                double remainingBytes = totalBytes - totalRead;
-                                                timeRemaining = TimeSpan.FromSeconds(remainingBytes / (speedKBps * 1024));
-                                            }
-                                        }
+                                        double speedKBps = (totalRead - lastReportBytes) / (now - lastReportTime).TotalSeconds / 1024.0;
+                                        TimeSpan timeRemaining = speedKBps > 0 ? TimeSpan.FromSeconds((totalBytes - totalRead) / (speedKBps * 1024)) : TimeSpan.Zero;
                                         var info = new DownloadProgressInfo
                                         {
                                             BytesReceived = totalRead,
@@ -165,40 +222,46 @@ namespace HomeworkViewer
                             }
                             if (progress != null && totalBytes > 0)
                             {
-                                var finalInfo = new DownloadProgressInfo { BytesReceived = totalBytes, TotalBytes = totalBytes, Percentage = 100, SpeedKBps = 0, TimeRemaining = TimeSpan.Zero };
-                                progress.Report(finalInfo);
+                                progress.Report(new DownloadProgressInfo { BytesReceived = totalBytes, TotalBytes = totalBytes, Percentage = 100 });
                             }
                         }
                     }
 
+                    // 3. 下载后检查文件大小（至少 500KB）
+                    var fileInfo = new FileInfo(localPath);
+                    if (fileInfo.Length < 500 * 1024)
+                    {
+                        File.Delete(localPath);
+                        throw new Exception($"下载的文件过小（{fileInfo.Length}字节），可能为错误页面（如 404、403）");
+                    }
+
+                    // 4. 哈希校验
                     if (!string.IsNullOrEmpty(expectedHash))
                     {
                         string actualHash = await Task.Run(() => ComputeSHA256(localPath));
+                        // 移除可能的 "sha256:" 前缀
+                        if (expectedHash.StartsWith("sha256:", StringComparison.OrdinalIgnoreCase))
+                            expectedHash = expectedHash.Substring(7);
                         if (!string.Equals(actualHash, expectedHash, StringComparison.OrdinalIgnoreCase))
                         {
                             File.Delete(localPath);
-                            throw new Exception($"哈希校验失败：期望 {expectedHash}，实际 {actualHash}");
+                            throw new Exception($"哈希校验失败！\n期望: {expectedHash}\n实际: {actualHash}");
                         }
                     }
-                    return localPath;
-                }
-                catch (HttpRequestException ex) when (mirroredUrl != downloadUrl)
-                {
-                    mirroredUrl = downloadUrl;
-                    lastException = ex;
-                    retry++;
-                    await Task.Delay(1000);
-                    continue;
+
+                    return localPath; // 成功
                 }
                 catch (Exception ex)
                 {
                     lastException = ex;
-                    retry++;
-                    if (retry >= 3) throw;
-                    await Task.Delay(1000 * retry);
+                    Debug.WriteLine($"下载失败 (尝试 {attempt + 1}/{urlsToTry.Count}, URL={currentUrl}): {ex.Message}");
+                    if (attempt == urlsToTry.Count - 1)
+                        break; // 最后一次，不再重试
+                    await Task.Delay(1000 * (attempt + 1));
                 }
             }
-            throw lastException ?? new Exception("下载失败");
+
+            throw lastException ?? new Exception("下载失败，所有 URL 均无效");
         }
 
         private string ComputeSHA256(string filePath)

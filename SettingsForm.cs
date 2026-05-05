@@ -68,6 +68,7 @@ namespace HomeworkViewer
         private RadioButton rbImageBg;
         private TextBox txtBgImagePath;
         private Button btnBrowseBgImage;
+        private ComboBox cmbImageFillMode; // 填充方式下拉框
 
         // 时间段
         private NumericUpDown numEveningCount;
@@ -107,12 +108,17 @@ namespace HomeworkViewer
         private MirrorManager _mirrorManager;
         private DownloadHelper _downloadHelper;
 
+        private Bitmap _cachedBackground;        // 缓存的背景图（已缩放到虚拟尺寸）
+        private TextureBrush _tileBrush;         // 平铺模式用的笔刷
+        private ImageFillMode _cachedBackgroundMode; // 记录上次的填充模式，用于判断是否需要重新生成
+
         public SettingsForm(HomeworkViewer main)
         {
             mainForm = main;
             config = AppConfig.Load();
             _mirrorManager = new MirrorManager();
             _downloadHelper = new DownloadHelper();
+            _downloadHelper.UseMirror = true;  // 强制启用镜像下载
 
             InitializeComponent();
             LoadSettings();
@@ -861,7 +867,7 @@ namespace HomeworkViewer
             return panel;
         }
 
-        // ---------- 基本设置（使用分割线，移除科目选择） ----------
+        // ---------- 基本设置 ----------
         private Panel basicPanel;
         private void CreateBasicPage()
         {
@@ -880,7 +886,6 @@ namespace HomeworkViewer
             for (int i = 0; i < 9; i++)
                 layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
 
-            // 显示分类
             AddSectionHeader(layout, "显示", 0);
             AddSettingRow(layout, "字号大小:", cmbFontSize = CreateComboBox(100), 1);
             cmbFontSize.Items.AddRange(new object[] { "小", "中", "大" });
@@ -888,7 +893,6 @@ namespace HomeworkViewer
 
             AddSeparator(layout, 2);
 
-            // 滚动分类
             AddSectionHeader(layout, "滚动", 3);
             AddSettingRow(layout, "滚动速度(px/s):", numScrollSpeed = CreateNumericUpDown(80, 0, 200), 4);
             AddSettingRow(layout, "自动翻页间隔(秒):", numAutoPageInterval = CreateNumericUpDown(80, 5, 300), 5);
@@ -896,7 +900,6 @@ namespace HomeworkViewer
 
             AddSeparator(layout, 6);
 
-            // 导出分类
             AddSectionHeader(layout, "导出", 7);
             AddSettingRow(layout, "默认导出格式:", cmbDefaultExportFormat = CreateComboBox(150), 8);
             cmbDefaultExportFormat.Items.AddRange(new object[] { "txt", "pdf", "jpg", "html" });
@@ -906,7 +909,7 @@ namespace HomeworkViewer
         }
         private void ShowBasicPage() => contentPanel.Controls.Add(basicPanel);
 
-        // ---------- 外观设置（使用分割线，添加滚动条） ----------
+        // ---------- 外观设置（包含背景图片填充方式） ----------
         private Panel appearancePanel;
         private void CreateAppearancePage()
         {
@@ -915,14 +918,14 @@ namespace HomeworkViewer
             {
                 Dock = DockStyle.Top,
                 ColumnCount = 2,
-                RowCount = 21,
+                RowCount = 23,
                 Padding = new Padding(20),
                 AutoSize = true,
                 BackColor = Color.Transparent
             };
             layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 140));
             layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-            for (int i = 0; i < 21; i++)
+            for (int i = 0; i < 23; i++)
                 layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
 
             // 卡片样式
@@ -1020,8 +1023,8 @@ namespace HomeworkViewer
             bgTypePanel.Controls.Add(rbImageBg);
             AddSettingRow(layout, "类型:", bgTypePanel, 19);
 
-            // 图片路径（动态可见）
-            FlowLayoutPanel imagePanel = new FlowLayoutPanel { FlowDirection = FlowDirection.LeftToRight, AutoSize = true, BackColor = Color.Transparent };
+            // 图片路径
+            FlowLayoutPanel imagePathPanel = new FlowLayoutPanel { FlowDirection = FlowDirection.LeftToRight, AutoSize = true, BackColor = Color.Transparent };
             txtBgImagePath = new TextBox { Width = 200, BackColor = Color.FromArgb(64, 64, 64), ForeColor = Color.White, BorderStyle = BorderStyle.FixedSingle };
             btnBrowseBgImage = new Button { Text = "浏览", Width = 60, Height = 23, BackColor = Color.FromArgb(64, 64, 64), ForeColor = Color.White, FlatStyle = FlatStyle.Flat };
             btnBrowseBgImage.Click += (s, e) =>
@@ -1033,26 +1036,32 @@ namespace HomeworkViewer
                         txtBgImagePath.Text = ofd.FileName;
                 }
             };
-            imagePanel.Controls.Add(txtBgImagePath);
-            imagePanel.Controls.Add(btnBrowseBgImage);
+            imagePathPanel.Controls.Add(txtBgImagePath);
+            imagePathPanel.Controls.Add(btnBrowseBgImage);
             Label lblBgImage = new Label { Text = "图片路径:", TextAlign = ContentAlignment.MiddleRight, ForeColor = Color.White, BackColor = Color.Transparent, AutoSize = true };
             layout.Controls.Add(lblBgImage, 0, 20);
-            layout.Controls.Add(imagePanel, 1, 20);
-            layout.RowCount = 21;
-            layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            layout.Controls.Add(imagePathPanel, 1, 20);
 
-            // 控制可见性
+            // 填充方式
+            cmbImageFillMode = CreateComboBox(120);
+            cmbImageFillMode.Items.AddRange(new object[] { "填充", "适应", "覆盖", "拉伸", "平铺", "居中" });
+            cmbImageFillMode.SelectedIndex = (int)config.BackgroundImageMode;
+            AddSettingRow(layout, "填充方式:", cmbImageFillMode, 21);
+
+            // 控制可见性：仅当使用图片背景时显示路径和填充方式
             Action updateVisibility = () =>
             {
                 bool useImage = rbImageBg.Checked;
                 lblBgImage.Visible = useImage;
-                imagePanel.Visible = useImage;
+                imagePathPanel.Visible = useImage;
+                cmbImageFillMode.Visible = useImage;
                 cmbBgEffect.Enabled = !useImage;
             };
             rbTransparentBg.CheckedChanged += (s, e) => updateVisibility();
             rbImageBg.CheckedChanged += (s, e) => updateVisibility();
             updateVisibility();
 
+            layout.RowCount = 22;
             appearancePanel.Controls.Add(layout);
         }
         private void ShowAppearancePage() => contentPanel.Controls.Add(appearancePanel);
@@ -1074,7 +1083,6 @@ namespace HomeworkViewer
             for (int i = 0; i < 7; i++)
                 mainLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
 
-            // 通用设置
             AddSectionHeader(mainLayout, "通用设置", 0);
             chkShowDueTime = new CheckBox
             {
@@ -1088,7 +1096,6 @@ namespace HomeworkViewer
 
             AddSeparator(mainLayout, 2);
 
-            // 晚修节数
             AddSectionHeader(mainLayout, "晚修节数", 3);
             FlowLayoutPanel countPanel = new FlowLayoutPanel { FlowDirection = FlowDirection.LeftToRight, AutoSize = true, BackColor = Color.Transparent };
             numEveningCount = new NumericUpDown { Minimum = 1, Maximum = 6, Value = config.EveningClassCount, Width = 60, BackColor = Color.FromArgb(64, 64, 64), ForeColor = Color.White };
@@ -1096,7 +1103,6 @@ namespace HomeworkViewer
             countPanel.Controls.Add(numEveningCount);
             mainLayout.Controls.Add(countPanel, 0, 4);
 
-            // 各节时间段
             eveningPanel = new FlowLayoutPanel
             {
                 FlowDirection = FlowDirection.TopDown,
@@ -1107,7 +1113,6 @@ namespace HomeworkViewer
             };
             mainLayout.Controls.Add(eveningPanel, 0, 5);
 
-            // 测试闪烁按钮（默认隐藏）
             FlowLayoutPanel buttonPanel = new FlowLayoutPanel { FlowDirection = FlowDirection.LeftToRight, AutoSize = true, BackColor = Color.Transparent, Margin = new Padding(0, 10, 0, 0) };
             btnTestFlash = new Button { Text = "测试闪烁", Width = 100, Height = 30, BackColor = Color.FromArgb(64, 64, 64), ForeColor = Color.White, FlatStyle = FlatStyle.Flat, Visible = false };
             btnTestFlash.Click += BtnTestFlash_Click;
@@ -1327,7 +1332,7 @@ namespace HomeworkViewer
             for (int i = 0; i < 11; i++)
                 layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
 
-            Label lblVersion = new Label { Text = "作业展板 版本 2.1.0", Font = new Font("微软雅黑", 12, FontStyle.Bold), AutoSize = true, ForeColor = Color.White };
+            Label lblVersion = new Label { Text = "作业展板 版本 2.2.0", Font = new Font("微软雅黑", 12, FontStyle.Bold), AutoSize = true, ForeColor = Color.White };
             layout.Controls.Add(lblVersion, 0, 0);
             Label lblAuthor = new Label { Text = "作者: MaxSui 隋修梁", AutoSize = true, ForeColor = Color.White, Font = new Font("微软雅黑", 10) };
             layout.Controls.Add(lblAuthor, 0, 1);
@@ -1461,6 +1466,7 @@ namespace HomeworkViewer
             rbTransparentBg.Checked = !config.UseBackgroundImage;
             rbImageBg.Checked = config.UseBackgroundImage;
             txtBgImagePath.Text = config.BackgroundImagePath;
+            cmbImageFillMode.SelectedIndex = (int)config.BackgroundImageMode;
         }
 
         private void BtnOK_Click(object sender, EventArgs e)
@@ -1501,6 +1507,7 @@ namespace HomeworkViewer
             }
             config.UseBackgroundImage = rbImageBg.Checked;
             config.BackgroundImagePath = bgPath;
+            config.BackgroundImageMode = (ImageFillMode)cmbImageFillMode.SelectedIndex;
 
             config.Save();
 

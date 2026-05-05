@@ -6,6 +6,16 @@ using System.Text.Json;
 
 namespace HomeworkViewer
 {
+    public enum ImageFillMode
+    {
+        Fill,           // 填充（拉伸填满，可能变形）
+        Uniform,        // 适应（保持比例，完整显示，可能留边）
+        UniformToFill,  // 覆盖（保持比例，填满，裁剪）
+        Stretch,        // 拉伸（强制拉伸）
+        Tile,           // 平铺
+        Center          // 居中（原始大小）
+    }
+
     public class EveningClassTime
     {
         public string Start { get; set; }
@@ -18,7 +28,7 @@ namespace HomeworkViewer
         public string LastMode { get; set; } = "大理";
         public int FontSizeLevel { get; set; } = 1;
         public int CardOpacity { get; set; } = 15;
-        public bool FontColorWhite { get; set; } = false;
+        public bool FontColorWhite { get; set; } = true;
         public string BarColor { get; set; } = "255,255,0";
 
         // 晚修相关
@@ -47,6 +57,7 @@ namespace HomeworkViewer
         // 背景图片
         public bool UseBackgroundImage { get; set; } = false;
         public string BackgroundImagePath { get; set; } = "";
+        public ImageFillMode BackgroundImageMode { get; set; } = ImageFillMode.Uniform;  // 新增
 
         // 字体
         public string FontFamily { get; set; } = "微软雅黑";
@@ -66,14 +77,13 @@ namespace HomeworkViewer
         public bool MgmtForceRemote { get; set; } = false;
         public string OrganizationName { get; set; } = "";
 
-        // ========== 新增功能 ==========
-        // 自定义卡片科目列表（顺序即卡片显示顺序，每页 3x2）
+        // 自定义卡片科目列表
         public List<string> CustomSubjects { get; set; } = new List<string>();
 
-        // 周末作业延续：周五的作业自动显示在周六、周日
+        // 周末作业延续
         public bool ExtendFridayHomeworkToWeekend { get; set; } = true;
 
-        // ========== 已废弃但保留兼容的属性（不再使用） ==========
+        // 已废弃但保留兼容
         [Obsolete("已废弃，不再使用")]
         public int BackgroundOpacity { get; set; } = 12;
 
@@ -93,7 +103,6 @@ namespace HomeworkViewer
                     string json = File.ReadAllText(path);
                     var config = JsonSerializer.Deserialize<AppConfig>(json) ?? new AppConfig();
 
-                    // 确保晚修时间段列表与节数一致
                     if (config.EveningClassTimes == null)
                         config.EveningClassTimes = new List<EveningClassTime>();
                     while (config.EveningClassTimes.Count < config.EveningClassCount)
@@ -101,25 +110,22 @@ namespace HomeworkViewer
                     if (config.EveningClassTimes.Count > config.EveningClassCount)
                         config.EveningClassTimes = config.EveningClassTimes.GetRange(0, config.EveningClassCount);
 
-                    // 确保 ClassReps 不为空
                     if (config.ClassReps == null)
                         config.ClassReps = new Dictionary<string, string>();
 
-                    // 确保 CustomSubjects 不为空
                     if (config.CustomSubjects == null || config.CustomSubjects.Count == 0)
-                    {
                         config.CustomSubjects = new List<string> { "语文", "数学", "英语", "物理", "化学", "生物" };
-                    }
 
-                    // 确保 AutoPageInterval 有默认值
                     if (config.AutoPageInterval <= 0) config.AutoPageInterval = 10;
+
+                    if (!Enum.IsDefined(typeof(ImageFillMode), config.BackgroundImageMode))
+                        config.BackgroundImageMode = ImageFillMode.Uniform;
 
                     return config;
                 }
                 catch { }
             }
 
-            // 返回默认配置
             var defaultConfig = new AppConfig();
             defaultConfig.EveningClassTimes.Clear();
             for (int i = 0; i < defaultConfig.EveningClassCount; i++)
