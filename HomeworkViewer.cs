@@ -14,6 +14,7 @@ namespace HomeworkViewer
     public class HomeworkViewer : Form
     {
         // ====================== 常量 ======================
+        private bool _isEditingFinishing = false;
         private readonly Size VIRTUAL_SIZE = new Size(1200, 675);
         private const int BTN_SQUARE_SIZE = 46;
         private readonly Point FULLSCREEN_BTN_POS = new Point(1200 - BTN_SQUARE_SIZE - 10, 13);
@@ -30,6 +31,10 @@ namespace HomeworkViewer
         private Panel _drawerPanel;
         private bool _drawerOpen = false;
         private const int MAX_DRAWER_HEIGHT_RATIO = 3;
+
+        // 自定义字体对象（用于卡片内容）
+        private Font _customFontChinese, _customFontEnglish, _customFontNumber;
+        private Font _customContentFontChinese, _customContentFontEnglish, _customContentFontNumber;
 
         // 动画
         private Timer _animationTimer;
@@ -716,33 +721,17 @@ namespace HomeworkViewer
             font22?.Dispose(); font36?.Dispose(); hintFont?.Dispose(); buttonFont?.Dispose(); fontSmall?.Dispose();
 
             float scale = fontScales[appConfig.FontSizeLevel];
-            string fontName = appConfig.FontFamily;
+            string fontName = appConfig.UseCustomFont ? appConfig.CustomFontName : "微软雅黑";
 
-            if (appConfig.IsCustomFont)
-            {
-                var customFont = FontManager.GetCustomFont(20 * scale);
-                font30 = new Font(customFont.FontFamily, 20 * scale);
-                font22 = new Font(customFont.FontFamily, 21 * scale, FontStyle.Bold);
-                font12 = new Font(customFont.FontFamily, 10 * scale);
-                font20 = new Font(customFont.FontFamily, 15 * scale);
-                font24 = new Font(customFont.FontFamily, 14 * scale);
-                font36 = new Font(customFont.FontFamily, 35 * scale);
-                hintFont = new Font(customFont.FontFamily, 15 * scale);
-                buttonFont = new Font(customFont.FontFamily, 10 * scale);
-                fontSmall = new Font(customFont.FontFamily, 8 * scale);
-            }
-            else
-            {
-                font12 = new Font(fontName, 10 * scale);
-                font20 = new Font(fontName, 15 * scale);
-                font24 = new Font(fontName, 14 * scale);
-                font30 = new Font(fontName, 20 * scale);
-                font22 = new Font(fontName, 21 * scale, FontStyle.Bold);
-                font36 = new Font(fontName, 35 * scale);
-                hintFont = new Font(fontName, 15 * scale);
-                buttonFont = new Font(fontName, 10 * scale);
-                fontSmall = new Font(fontName, 8 * scale);
-            }
+            font12 = new Font(fontName, 10 * scale);
+            font20 = new Font(fontName, 15 * scale);
+            font24 = new Font(fontName, 14 * scale);
+            font30 = new Font(fontName, 20 * scale);
+            font22 = new Font(fontName, 21 * scale, FontStyle.Bold);
+            font36 = new Font(fontName, 35 * scale);
+            hintFont = new Font(fontName, 15 * scale);
+            buttonFont = new Font(fontName, 10 * scale);
+            fontSmall = new Font(fontName, 8 * scale);
 
             TEXT_COLOR = appConfig.FontColorWhite ? Color.White : Color.Black;
         }
@@ -1442,30 +1431,41 @@ namespace HomeworkViewer
 
         private void RenameCard(int index, string newName)
         {
+            if (index < 0 || index >= appConfig.CustomSubjects.Count) return;
             string oldName = appConfig.CustomSubjects[index];
-            if (oldName == newName) return;
+            if (string.IsNullOrEmpty(newName) || oldName == newName) return;
             if (appConfig.CustomSubjects.Contains(newName))
             {
                 MessageBox.Show("科目已存在！", "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
+
+            // 1. 更新科目列表
             appConfig.CustomSubjects[index] = newName;
+
+            // 2. 更新作业内容字典
             if (homeworkData.Subjects.ContainsKey(oldName))
             {
                 string content = homeworkData.Subjects[oldName];
                 homeworkData.Subjects.Remove(oldName);
                 homeworkData.Subjects[newName] = content;
             }
+
+            // 3. 更新提交时间字典
             if (homeworkData.DueTimes.ContainsKey(oldName))
             {
                 string due = homeworkData.DueTimes[oldName];
                 homeworkData.DueTimes.Remove(oldName);
                 homeworkData.DueTimes[newName] = due;
             }
+
+            // 4. 保存到文件
             SaveHomeworkData();
             appConfig.Save();
-            UpdateSubjectsByMode();
-            Invalidate();
+
+            // 5. 更新界面
+            UpdateSubjectsByMode();  // 重新计算网格布局
+            Invalidate();           // 刷新显示
         }
 
         private void SwapCards(int indexA, int indexB)
@@ -1593,71 +1593,36 @@ namespace HomeworkViewer
                 string subject = appConfig.CustomSubjects[rotationIndex];
                 string content = homeworkData.Subjects.ContainsKey(subject) ? homeworkData.Subjects[subject] : "";
 
+                g.TranslateTransform(_swipeOffset, 0);
+
                 if (_isSliding)
                 {
                     if (_slidePhase == 0)
                     {
-                        // 旧内容滑出：右箭头（direction=1）向左移，左箭头（direction=-1）向右移
                         float offsetX = (_slideDirection == 1) ? -_slideProgress * _drawerPanel.Width : _slideProgress * _drawerPanel.Width;
                         g.TranslateTransform(offsetX, 0);
-
                         string oldSubject = _oldSlideIndex >= 0 ? appConfig.CustomSubjects[_oldSlideIndex] : subject;
                         string oldContent = _oldSlideContent;
-                        using (Font titleFont = new Font("微软雅黑", 24, FontStyle.Bold))
-                        using (Font contentFont = new Font("微软雅黑", 16))
-                        using (Brush textBrush = new SolidBrush(Color.White))
-                        {
-                            int padding = 60;
-                            Rectangle drawRect = new Rectangle(padding, 20, _drawerPanel.Width - padding * 2, _drawerPanel.Height - 80);
-                            SizeF titleSize = g.MeasureString(oldSubject, titleFont);
-                            float titleX = (_drawerPanel.Width - titleSize.Width) / 2;
-                            g.DrawString(oldSubject, titleFont, textBrush, titleX, drawRect.Y);
-                            Rectangle contentRect = new Rectangle(drawRect.X, drawRect.Y + (int)titleSize.Height + 20, drawRect.Width, drawRect.Height - (int)titleSize.Height - 40);
-                            DrawPlainTextInArea(g, oldContent, contentRect, contentFont, true, 0);
-                        }
+                        DrawRotationContent(g, oldSubject, oldContent);
                         g.ResetTransform();
                     }
                     else
                     {
-                        // 新内容滑入：右箭头从右侧进入，左箭头从左侧进入
                         float offsetX = (_slideDirection == 1) ? (1 - _slideProgress) * _drawerPanel.Width : -(1 - _slideProgress) * _drawerPanel.Width;
                         g.TranslateTransform(offsetX, 0);
-
                         string newSubject = _newSlideIndex >= 0 ? appConfig.CustomSubjects[_newSlideIndex] : subject;
                         string newContent = _newSlideContent;
-                        using (Font titleFont = new Font("微软雅黑", 24, FontStyle.Bold))
-                        using (Font contentFont = new Font("微软雅黑", 16))
-                        using (Brush textBrush = new SolidBrush(Color.White))
-                        {
-                            int padding = 60;
-                            Rectangle drawRect = new Rectangle(padding, 20, _drawerPanel.Width - padding * 2, _drawerPanel.Height - 80);
-                            SizeF titleSize = g.MeasureString(newSubject, titleFont);
-                            float titleX = (_drawerPanel.Width - titleSize.Width) / 2;
-                            g.DrawString(newSubject, titleFont, textBrush, titleX, drawRect.Y);
-                            Rectangle contentRect = new Rectangle(drawRect.X, drawRect.Y + (int)titleSize.Height + 20, drawRect.Width, drawRect.Height - (int)titleSize.Height - 40);
-                            DrawPlainTextInArea(g, newContent, contentRect, contentFont, true, 0);
-                        }
+                        DrawRotationContent(g, newSubject, newContent);
                         g.ResetTransform();
                     }
                 }
                 else
                 {
-                    // 无动画：直接绘制当前科目
-                    using (Font titleFont = new Font("微软雅黑", 24, FontStyle.Bold))
-                    using (Font contentFont = new Font("微软雅黑", 16))
-                    using (Brush textBrush = new SolidBrush(Color.White))
-                    {
-                        int padding = 60;
-                        Rectangle drawRect = new Rectangle(padding, 20, _drawerPanel.Width - padding * 2, _drawerPanel.Height - 80);
-                        SizeF titleSize = g.MeasureString(subject, titleFont);
-                        float titleX = (_drawerPanel.Width - titleSize.Width) / 2;
-                        g.DrawString(subject, titleFont, textBrush, titleX, drawRect.Y);
-                        Rectangle contentRect = new Rectangle(drawRect.X, drawRect.Y + (int)titleSize.Height + 20, drawRect.Width, drawRect.Height - (int)titleSize.Height - 40);
-                        DrawPlainTextInArea(g, content, contentRect, contentFont, true, 0);
-                    }
+                    DrawRotationContent(g, subject, content);
                 }
 
-                // 绘制左右箭头（仅在非滑动状态显示）
+                g.ResetTransform();
+
                 if (!_isSwiping)
                 {
                     int arrowSize = 46;
@@ -1676,20 +1641,22 @@ namespace HomeworkViewer
             }
             else
             {
-                // 普通模式：显示日期时间
                 DateTime now = DateTime.Now;
                 string timeStr = now.ToString("HH:mm");
                 string dateStr = now.ToString("yyyy年MM月dd日 dddd");
+
+                using (Brush whiteBrush = new SolidBrush(Color.White))
                 using (Font timeFont = new Font("微软雅黑", 36, FontStyle.Bold))
                 using (Font dateFont = new Font("微软雅黑", 16))
-                using (Brush whiteBrush = new SolidBrush(Color.White))
                 {
                     SizeF timeSize = g.MeasureString(timeStr, timeFont);
                     SizeF dateSize = g.MeasureString(dateStr, dateFont);
-                    float x = (_drawerPanel.Width - timeSize.Width) / 2;
-                    float y = (_drawerPanel.Height - (timeSize.Height + dateSize.Height + 10)) / 2;
-                    g.DrawString(timeStr, timeFont, whiteBrush, x, y);
-                    g.DrawString(dateStr, dateFont, whiteBrush, x, y + timeSize.Height + 10);
+                    float totalHeight = timeSize.Height + dateSize.Height + 10;
+                    float startY = (_drawerPanel.Height - totalHeight) / 2;
+                    float timeX = (_drawerPanel.Width - timeSize.Width) / 2;
+                    float dateX = (_drawerPanel.Width - dateSize.Width) / 2;
+                    g.DrawString(timeStr, timeFont, whiteBrush, timeX, startY);
+                    g.DrawString(dateStr, dateFont, whiteBrush, dateX, startY + timeSize.Height + 10);
                 }
             }
         }
@@ -2400,13 +2367,13 @@ namespace HomeworkViewer
                 imgAttr.Dispose();
             }
 
-            using (var smallFont = new Font("微软雅黑", 8))
+            // 按钮文字绘制：底部对齐后上移 6 像素
             using (var textBrush = new SolidBrush(Color.FromArgb(alphaInt, TEXT_COLOR)))
             {
-                SizeF textSize = g.MeasureString(text, smallFont);
+                SizeF textSize = g.MeasureString(text, buttonFont);
                 float textX = rect.Left + (rect.Width - textSize.Width) / 2;
-                float textY = rect.Bottom - textSize.Height - 1;
-                g.DrawString(text, smallFont, textBrush, textX, textY);
+                float textY = rect.Bottom - textSize.Height - 1;   // 底部上移 5px
+                g.DrawString(text, buttonFont, textBrush, textX, textY);
             }
         }
 
@@ -2699,7 +2666,6 @@ namespace HomeworkViewer
                     offsetX = flyInOffset;
 
                 Rectangle drawRect = new Rectangle(rect.X + (int)offsetX, rect.Y, rect.Width, rect.Height);
-
                 float fadeAlpha = _fadeInProgress.ContainsKey(cardIndex) ? _fadeInProgress[cardIndex] : 1f;
 
                 Matrix originalTransform = g.Transform;
@@ -2718,81 +2684,113 @@ namespace HomeworkViewer
                 int topAlpha = (int)(220 * opacityFactor * fadeAlpha);
                 int bottomAlpha = (int)(160 * opacityFactor * fadeAlpha);
                 using (var path = CreateRoundedRectPath(drawRect, ROUND_RADIUS))
-                using (var bgBrush = new LinearGradientBrush(drawRect, Color.FromArgb(topAlpha, 255, 255, 255), Color.FromArgb(bottomAlpha, 240, 240, 255), LinearGradientMode.Vertical))
                 {
-                    if (_isDragging && _isCardEditingMode)
+                    // 根据设置决定卡片背景颜色（是否使用顶部栏颜色）
+                    LinearGradientBrush bgBrush;
+                    if (appConfig.ApplyBarColorToCardBorder)   // 注意：这个变量控制背景颜色，变量名保持不变但实际意义是应用到卡片背景
                     {
-                        using (var grayBrush = new SolidBrush(Color.FromArgb(100, 40, 40, 40)))
-                            g.FillPath(grayBrush, path);
-                        if (cardIndex == _dragStartIndex)
-                        {
-                            using (var pen = new Pen(Color.Blue, 3))
-                                g.DrawPath(pen, path);
-                        }
-                        else
-                        {
-                            using (var pen = new Pen(Color.FromArgb(80, 80, 80), 1))
-                                g.DrawPath(pen, path);
-                        }
+                        Color barColor = ParseColor(appConfig.BarColor, Color.Yellow);
+                        Color startColor = Color.FromArgb(topAlpha, barColor.R, barColor.G, barColor.B);
+                        Color endColor = Color.FromArgb(bottomAlpha, barColor.R, barColor.G, barColor.B);
+                        bgBrush = new LinearGradientBrush(drawRect, startColor, endColor, LinearGradientMode.Vertical);
                     }
                     else
                     {
-                        g.FillPath(bgBrush, path);
-
-                        string dueTime = homeworkData.DueTimes.ContainsKey(subject) ? homeworkData.DueTimes[subject] : "";
-                        bool highlightActive = _activeEvenings.Contains(dueTime);
-                        bool highlightFlash = _flashingEvenings.Contains(dueTime);
-                        Color borderColor = Color.FromArgb(100, 128, 128, 128);
-                        float borderWidth = 1;
-                        if (_debugFlashing || highlightFlash)
+                        bgBrush = new LinearGradientBrush(drawRect, Color.FromArgb(topAlpha, 255, 255, 255), Color.FromArgb(bottomAlpha, 240, 240, 255), LinearGradientMode.Vertical);
+                    }
+                    using (bgBrush)
+                    {
+                        if (_isDragging && _isCardEditingMode)
                         {
-                            using (var redBrush = new SolidBrush(Color.FromArgb(flashStep, 255, 0, 0)))
-                                g.FillPath(redBrush, path);
-                            DrawLaserBorder(g, path, drawRect);
-                            borderColor = Color.FromArgb(200, 255, 0, 0);
-                        }
-                        else if (highlightActive) { borderColor = SystemColors.Highlight; borderWidth = 2; }
-                        using (var pen = new Pen(borderColor, borderWidth))
-                            g.DrawPath(pen, path);
-
-                        Font subjectFont = font22;
-                        int topOffset = 50;
-                        int subjectY = drawRect.Top + topOffset - subjectFont.Height;
-                        g.DrawString(subject, subjectFont, new SolidBrush(TEXT_COLOR), drawRect.Left + 10, subjectY);
-                        int lineY = drawRect.Top + topOffset;
-                        g.DrawLine(Pens.Gray, drawRect.Left + 10, lineY, drawRect.Right - 10, lineY);
-
-                        if (appConfig.ShowDueTime && !EditMode)
-                        {
-                            string dueTime2 = homeworkData.DueTimes.ContainsKey(subject) ? homeworkData.DueTimes[subject] : "";
-                            string displayTime = string.IsNullOrEmpty(dueTime2) ? "无" : dueTime2;
-                            string prefix = "提交时间：";
-                            float prefixWidth = g.MeasureString(prefix, fontSmall).Width;
-                            float timeWidth = g.MeasureString(displayTime, font22).Width;
-                            float totalWidth = prefixWidth + timeWidth;
-                            int rightX = drawRect.Right - 10;
-                            float startX = rightX - totalWidth;
-                            int timeY = lineY - font22.Height;
-                            int prefixY = lineY - fontSmall.Height;
-                            g.DrawString(prefix, fontSmall, new SolidBrush(TEXT_COLOR), startX, prefixY);
-                            Brush timeBrush = GetDueTimeBrush(displayTime);
-                            g.DrawString(displayTime, font22, timeBrush, startX + prefixWidth, timeY);
-                        }
-
-                        Rectangle textArea = new Rectangle(drawRect.Left + 10, drawRect.Top + topOffset + 10, drawRect.Width - 20, drawRect.Height - (topOffset + 20));
-                        if (editingSubjectIndex == cardIndex && currentEditType == EditFieldType.Subject) { }
-                        else if (homeworkData.Subjects.ContainsKey(subject) && !string.IsNullOrWhiteSpace(homeworkData.Subjects[subject]))
-                        {
-                            float scrollOffset = scrollOffsets.ContainsKey(cardIndex) ? scrollOffsets[cardIndex] : 0f;
-                            DrawPlainTextInArea(g, homeworkData.Subjects[subject], textArea, font30, false, scrollOffset);
+                            // 拖拽时灰色背景
+                            using (var grayBrush = new SolidBrush(Color.FromArgb(100, 40, 40, 40)))
+                                g.FillPath(grayBrush, path);
+                            if (cardIndex == _dragStartIndex)
+                            {
+                                using (var pen = new Pen(Color.Blue, 3))
+                                    g.DrawPath(pen, path);
+                            }
+                            else
+                            {
+                                using (var pen = new Pen(Color.FromArgb(80, 80, 80), 1))
+                                    g.DrawPath(pen, path);
+                            }
                         }
                         else
                         {
-                            using (var textPath = CreateRoundedRectPath(textArea, ROUND_RADIUS))
-                            using (var lightBrush = new SolidBrush(Color.FromArgb((int)(255 * opacityFactor * fadeAlpha), 255, 255, 255)))
-                                g.FillPath(lightBrush, textPath);
-                            string hint = editMode ? "点我编辑作业" : "今天暂时没有此项作业";
-                            g.DrawString(hint, hintFont, RED_SEMI, textArea, CenterStringFormat());
+                            // 正常卡片背景
+                            g.FillPath(bgBrush, path);
+
+                            // 晚修高亮/闪烁边框（边框不受背景颜色影响）
+                            string dueTime = homeworkData.DueTimes.ContainsKey(subject) ? homeworkData.DueTimes[subject] : "";
+                            bool highlightActive = _activeEvenings.Contains(dueTime);
+                            bool highlightFlash = _flashingEvenings.Contains(dueTime);
+                            Color borderColor;
+                            float borderWidth = 1;
+                            if (_debugFlashing || highlightFlash)
+                            {
+                                using (var redBrush = new SolidBrush(Color.FromArgb(flashStep, 255, 0, 0)))
+                                    g.FillPath(redBrush, path);
+                                DrawLaserBorder(g, path, drawRect);
+                                borderColor = Color.FromArgb(200, 255, 0, 0);
+                            }
+                            else if (highlightActive)
+                            {
+                                borderColor = SystemColors.Highlight;
+                                borderWidth = 2;
+                            }
+                            else
+                            {
+                                borderColor = Color.FromArgb(100, 128, 128, 128);
+                            }
+                            using (var pen = new Pen(borderColor, borderWidth))
+                                g.DrawPath(pen, path);
+
+                            // 科目名称
+                            Font subjectFont = font22;
+                            int topOffset = 50;
+                            int subjectY = drawRect.Top + topOffset - subjectFont.Height;
+                            g.DrawString(subject, subjectFont, new SolidBrush(TEXT_COLOR), drawRect.Left + 10, subjectY);
+                            int lineY = drawRect.Top + topOffset;
+                            g.DrawLine(Pens.Gray, drawRect.Left + 10, lineY, drawRect.Right - 10, lineY);
+
+                            // 提交时间
+                            if (appConfig.ShowDueTime && !EditMode)
+                            {
+                                string dueTime2 = homeworkData.DueTimes.ContainsKey(subject) ? homeworkData.DueTimes[subject] : "";
+                                string displayTime = string.IsNullOrEmpty(dueTime2) ? "无" : dueTime2;
+                                string prefix = "提交时间：";
+                                float prefixWidth = g.MeasureString(prefix, fontSmall).Width;
+                                float timeWidth = g.MeasureString(displayTime, font22).Width;
+                                float totalWidth = prefixWidth + timeWidth;
+                                int rightX = drawRect.Right - 10;
+                                float startX = rightX - totalWidth;
+                                int timeY = lineY - font22.Height;
+                                int prefixY = lineY - fontSmall.Height;
+                                g.DrawString(prefix, fontSmall, new SolidBrush(TEXT_COLOR), startX, prefixY);
+                                Brush timeBrush = GetDueTimeBrush(displayTime);
+                                g.DrawString(displayTime, font22, timeBrush, startX + prefixWidth, timeY);
+                            }
+
+                            // 作业内容区域
+                            Rectangle textArea = new Rectangle(drawRect.Left + 10, drawRect.Top + topOffset + 10, drawRect.Width - 20, drawRect.Height - (topOffset + 20));
+                            if (editingSubjectIndex == cardIndex && currentEditType == EditFieldType.Subject)
+                            {
+                                // 正在编辑科目名称，跳过内容绘制
+                            }
+                            else if (homeworkData.Subjects.ContainsKey(subject) && !string.IsNullOrWhiteSpace(homeworkData.Subjects[subject]))
+                            {
+                                float scrollOffset = scrollOffsets.ContainsKey(cardIndex) ? scrollOffsets[cardIndex] : 0f;
+                                DrawPlainTextInArea(g, homeworkData.Subjects[subject], textArea, font30, false, scrollOffset);
+                            }
+                            else
+                            {
+                                using (var textPath = CreateRoundedRectPath(textArea, ROUND_RADIUS))
+                                using (var lightBrush = new SolidBrush(Color.FromArgb((int)(255 * opacityFactor * fadeAlpha), 255, 255, 255)))
+                                    g.FillPath(lightBrush, textPath);
+                                string hint = editMode ? "点我编辑作业" : "今天暂时没有此项作业";
+                                g.DrawString(hint, hintFont, RED_SEMI, textArea, CenterStringFormat());
+                            }
                         }
                     }
                 }
@@ -2821,6 +2819,7 @@ namespace HomeworkViewer
                 }
             }
 
+            // 拖拽排序时的目标虚线框
             if (_isDragging && _isCardEditingMode && _dragOverIndex != -1 && _dragOverIndex != _dragStartIndex)
             {
                 int startIdx = _currentPage * CARDS_PER_PAGE;
@@ -2840,6 +2839,7 @@ namespace HomeworkViewer
                 }
             }
 
+            // 卡片管理模式下绘制虚线卡片占位符（添加卡片）
             if (_isCardEditingMode && !_isDragging)
             {
                 int realTotalPages = (int)Math.Ceiling(appConfig.CustomSubjects.Count / (double)CARDS_PER_PAGE);
@@ -2921,6 +2921,7 @@ namespace HomeworkViewer
                 }
             }
 
+            // 分页箭头
             if (TotalPages > 1 && !rotationMode && leftArrowImage != null && rightArrowImage != null)
             {
                 int arrowSize = 40;
@@ -2934,6 +2935,8 @@ namespace HomeworkViewer
         // ------------------------------ 滚动文本 ------------------------------
         private void DrawPlainTextInArea(Graphics g, string text, Rectangle area, Font font, bool center = false, float scrollOffset = 0f)
         {
+            if (string.IsNullOrEmpty(text)) return;
+
             var lines = new List<string>();
             foreach (string para in text.Split('\n'))
             {
@@ -2943,7 +2946,8 @@ namespace HomeworkViewer
                 foreach (string word in words)
                 {
                     string test = line + (line == "" ? "" : " ") + word;
-                    if (g.MeasureString(test, font).Width <= area.Width) line = test;
+                    if (g.MeasureString(test, font).Width <= area.Width)
+                        line = test;
                     else
                     {
                         if (!string.IsNullOrEmpty(line)) lines.Add(line);
@@ -2961,7 +2965,8 @@ namespace HomeworkViewer
                             }
                             line = "";
                         }
-                        else line = word;
+                        else
+                            line = word;
                     }
                 }
                 if (!string.IsNullOrEmpty(line)) lines.Add(line);
@@ -2980,7 +2985,10 @@ namespace HomeworkViewer
                         SizeF sz = g.MeasureString(lines[i], font);
                         g.DrawString(lines[i], font, brush, area.Left + (area.Width - sz.Width) / 2, y);
                     }
-                    else g.DrawString(lines[i], font, brush, area.Left + 5, y);
+                    else
+                    {
+                        g.DrawString(lines[i], font, brush, area.Left + 5, y);
+                    }
                 }
             }
             g.Restore(state);
@@ -3154,22 +3162,41 @@ namespace HomeworkViewer
 
         private void FinishInlineEdit()
         {
-            if (editingSubjectIndex == -1 || inlineEditControl == null) return;
-            TextBox textBox = inlineEditControl as TextBox;
-            if (textBox != null)
+            if (_isEditingFinishing) return;
+            if (inlineEditControl == null) return;
+            _isEditingFinishing = true;
+            try
             {
-                textBox.LostFocus -= InlineEdit_LostFocus;
-                textBox.KeyDown -= InlineEdit_KeyDown;
-                string subject = appConfig.CustomSubjects[editingSubjectIndex];
-                homeworkData.Subjects[subject] = textBox.Text;
-                SaveHomeworkData();
+                if (editingSubjectIndex != -1 && inlineEditControl is TextBox textBox &&
+                    editingSubjectIndex >= 0 && editingSubjectIndex < appConfig.CustomSubjects.Count)
+                {
+                    // 移除事件，防止再次触发
+                    textBox.LostFocus -= InlineEdit_LostFocus;
+                    textBox.KeyDown -= InlineEdit_KeyDown;
+                    // 只处理作业内容编辑
+                    if (currentEditType == EditFieldType.None)
+                    {
+                        string subject = appConfig.CustomSubjects[editingSubjectIndex];
+                        if (homeworkData.Subjects.ContainsKey(subject))
+                            homeworkData.Subjects[subject] = textBox.Text;
+                        SaveHomeworkData();
+                    }
+                }
+                // 安全释放控件
+                if (inlineEditControl != null && !inlineEditControl.IsDisposed)
+                {
+                    Controls.Remove(inlineEditControl);
+                    inlineEditControl.Dispose();
+                }
+                inlineEditControl = null;
+                editingSubjectIndex = -1;
+                currentEditType = EditFieldType.None;
+                Invalidate();
             }
-            Controls.Remove(inlineEditControl);
-            inlineEditControl.Dispose();
-            inlineEditControl = null;
-            editingSubjectIndex = -1;
-            currentEditType = EditFieldType.None;
-            Invalidate();
+            finally
+            {
+                _isEditingFinishing = false;
+            }
         }
 
         private void CancelInlineEdit()
@@ -3317,6 +3344,19 @@ namespace HomeworkViewer
                 fullscreen = true;
                 UpdateScale();
             }
+            // 仅当首次运行时弹出向导
+            if (appConfig.FirstRunCompleted == 0)
+            {
+                using (var wizard = new FirstRunWizard(appConfig))
+                {
+                    if (wizard.ShowDialog() == DialogResult.OK)
+                    {
+                        appConfig.FirstRunCompleted = 1;
+                        appConfig.Save();
+                        ApplySettings(appConfig);
+                    }
+                }
+            }
 
             StartCardFlyInAnimation(1);
         }
@@ -3341,6 +3381,14 @@ namespace HomeworkViewer
             _cachedBackground?.Dispose();
             _tileBrush?.Dispose();
             _backgroundImage?.Dispose();
+
+            // 释放自定义字体
+            _customFontChinese?.Dispose();
+            _customFontEnglish?.Dispose();
+            _customFontNumber?.Dispose();
+            _customContentFontChinese?.Dispose();
+            _customContentFontEnglish?.Dispose();
+            _customContentFontNumber?.Dispose();
 
             base.OnFormClosed(e);
         }
@@ -3583,7 +3631,7 @@ namespace HomeworkViewer
                             MessageBox.Show("当前已由管理端控制，无法编辑作业。", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
                             return;
                         }
-                        StartInlineEdit(cardIndex, EditFieldType.Subject, subjectArea);
+                        StartInlineEdit(cardIndex, EditFieldType.None, subjectArea);
                         break;
                     }
                 }
@@ -3591,11 +3639,29 @@ namespace HomeworkViewer
         }
 
         // ------------------------------ 内联编辑辅助方法 ------------------------------
+        /// <summary>
+        /// 在指定位置绘制分段文本（支持中/英/数字体）
+        /// </summary>
+        private void DrawRotationContent(Graphics g, string subject, string content)
+        {
+            using (Brush textBrush = new SolidBrush(TEXT_COLOR))
+            using (Font titleFont = new Font("微软雅黑", 24, FontStyle.Bold))
+            using (Font contentFont = new Font("微软雅黑", 16))
+            {
+                int padding = 60;
+                Rectangle drawRect = new Rectangle(padding, 20, _drawerPanel.Width - padding * 2, _drawerPanel.Height - 80);
+                SizeF titleSize = g.MeasureString(subject, titleFont);
+                float titleX = (_drawerPanel.Width - titleSize.Width) / 2;
+                g.DrawString(subject, titleFont, textBrush, titleX, drawRect.Y);
+                Rectangle contentRect = new Rectangle(drawRect.X, drawRect.Y + (int)titleSize.Height + 20, drawRect.Width, drawRect.Height - (int)titleSize.Height - 40);
+                DrawPlainTextInArea(g, content, contentRect, contentFont, true, 0);
+            }
+        }
         private void StartInlineEdit(int subjectIndex, EditFieldType fieldType, Rectangle fieldRect)
         {
             if (editingSubjectIndex != -1) FinishInlineEdit();
             editingSubjectIndex = subjectIndex;
-            currentEditType = fieldType;
+            currentEditType = EditFieldType.None;  // 作业内容编辑
 
             string subject = appConfig.CustomSubjects[subjectIndex];
             Point screenLoc = MapToScreen(fieldRect.Location);
@@ -3608,7 +3674,8 @@ namespace HomeworkViewer
                 int newLevel = appConfig.FontSizeLevel + 1;
                 if (newLevel > 2) newLevel = 2;
                 float scale = fontScales[newLevel];
-                editFont = new Font("微软雅黑", 20 * scale);
+                string fontName = appConfig.UseCustomFont ? appConfig.CustomFontName : "微软雅黑";
+                editFont = new Font(fontName, 20 * scale);
             }
 
             var textBox = new TextBox
@@ -3659,6 +3726,7 @@ namespace HomeworkViewer
                 BackColor = Color.FromArgb(40, 40, 40),
                 ForeColor = Color.White
             };
+            // 科目名称编辑的失焦事件绑定到 FinishEditingSubjectName
             textBox.LostFocus += (s, ev) => FinishEditingSubjectName();
             textBox.KeyDown += (s, ev) =>
             {
@@ -3680,21 +3748,37 @@ namespace HomeworkViewer
 
         private void FinishEditingSubjectName()
         {
-            if (_isCleaningUp) return;
-            if (editingSubjectIndex == -1 || inlineEditControl == null) return;
-            _isCleaningUp = true;
-            TextBox textBox = inlineEditControl as TextBox;
-            string newName = textBox.Text.Trim();
-            if (!string.IsNullOrEmpty(newName) && newName != appConfig.CustomSubjects[editingSubjectIndex])
+            if (_isEditingFinishing) return;
+            if (editingSubjectIndex == -1 || inlineEditControl == null || inlineEditControl.IsDisposed) return;
+            _isEditingFinishing = true;
+            try
             {
-                CleanupSubjectEdit();
-                RenameCard(editingSubjectIndex, newName);
+                TextBox textBox = inlineEditControl as TextBox;
+                string newName = textBox?.Text.Trim();
+                int targetIndex = editingSubjectIndex;
+                string oldName = targetIndex >= 0 && targetIndex < appConfig.CustomSubjects.Count ? appConfig.CustomSubjects[targetIndex] : null;
+                
+                // 先清理控件（避免重复进入）
+                if (inlineEditControl != null && !inlineEditControl.IsDisposed)
+                {
+                    Controls.Remove(inlineEditControl);
+                    inlineEditControl.Dispose();
+                }
+                inlineEditControl = null;
+                editingSubjectIndex = -1;
+                currentEditType = EditFieldType.None;
+                Invalidate();
+
+                // 执行重命名
+                if (!string.IsNullOrEmpty(newName) && newName != oldName && oldName != null)
+                {
+                    RenameCard(targetIndex, newName);
+                }
             }
-            else
+            finally
             {
-                CleanupSubjectEdit();
+                _isEditingFinishing = false;
             }
-            _isCleaningUp = false;
         }
 
         private void CancelEditingSubjectName()
@@ -3708,7 +3792,7 @@ namespace HomeworkViewer
 
         private void CleanupSubjectEdit()
         {
-            if (inlineEditControl != null)
+            if (inlineEditControl != null && !inlineEditControl.IsDisposed)
             {
                 Controls.Remove(inlineEditControl);
                 inlineEditControl.Dispose();

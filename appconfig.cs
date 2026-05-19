@@ -26,10 +26,11 @@ namespace HomeworkViewer
     {
         // 基本设置
         public string LastMode { get; set; } = "大理";
+        public int FirstRunCompleted { get; set; } = 0; // 0:未完成, 1:已完成
         public int FontSizeLevel { get; set; } = 1;
         public int CardOpacity { get; set; } = 15;
         public bool FontColorWhite { get; set; } = true;
-        public string BarColor { get; set; } = "255,255,0";
+        public string BarColor { get; set; } = "128,255,255"; // 默认蓝色
 
         // 晚修相关
         public int EveningClassCount { get; set; } = 3;
@@ -57,11 +58,11 @@ namespace HomeworkViewer
         // 背景图片
         public bool UseBackgroundImage { get; set; } = false;
         public string BackgroundImagePath { get; set; } = "";
-        public ImageFillMode BackgroundImageMode { get; set; } = ImageFillMode.Uniform;  // 新增
+        public ImageFillMode BackgroundImageMode { get; set; } = ImageFillMode.Uniform;
 
-        // 字体
-        public string FontFamily { get; set; } = "微软雅黑";
-        public bool IsCustomFont { get; set; } = false;
+        // 字体设置（统一自定义字体）
+        public bool UseCustomFont { get; set; } = false;
+        public string CustomFontName { get; set; } = "微软雅黑";
 
         // 卡片行列尺寸（0 表示自动）
         public int RowHeight { get; set; } = 0;
@@ -82,6 +83,9 @@ namespace HomeworkViewer
 
         // 周末作业延续
         public bool ExtendFridayHomeworkToWeekend { get; set; } = true;
+
+        // 将顶部栏颜色应用到卡片背景
+        public bool ApplyBarColorToCardBorder { get; set; } = false;
 
         // 已废弃但保留兼容
         [Obsolete("已废弃，不再使用")]
@@ -121,6 +125,9 @@ namespace HomeworkViewer
                     if (!Enum.IsDefined(typeof(ImageFillMode), config.BackgroundImageMode))
                         config.BackgroundImageMode = ImageFillMode.Uniform;
 
+                    if (string.IsNullOrEmpty(config.CustomFontName))
+                        config.CustomFontName = "微软雅黑";
+
                     return config;
                 }
                 catch { }
@@ -133,6 +140,10 @@ namespace HomeworkViewer
             defaultConfig.ClassReps = new Dictionary<string, string>();
             defaultConfig.CustomSubjects = new List<string> { "语文", "数学", "英语", "物理", "化学", "生物" };
             defaultConfig.AutoPageInterval = 10;
+            defaultConfig.FontColorWhite = true;
+            defaultConfig.ApplyBarColorToCardBorder = false;
+            defaultConfig.UseCustomFont = false;
+            defaultConfig.CustomFontName = "微软雅黑";
             return defaultConfig;
         }
 

@@ -1,43 +1,37 @@
 using System;
 using System.Drawing;
 using System.Drawing.Text;
-using System.IO;
-using System.Runtime.InteropServices;
 
 namespace HomeworkViewer
 {
     public static class FontManager
     {
-        private static PrivateFontCollection _privateFonts = new PrivateFontCollection();
-        private static bool _customLoaded = false;
-
-        public static void LoadCustomFont(string fontPath)
+        public static Font GetFont(string fontName, float size, FontStyle style = FontStyle.Regular)
         {
-            if (!File.Exists(fontPath)) return;
-            _privateFonts.AddFontFile(fontPath);
-            _customLoaded = true;
-        }
-
-        public static Font GetFont(string fontFamilyName, float size, FontStyle style = FontStyle.Regular)
-        {
-            if (!string.IsNullOrEmpty(fontFamilyName))
+            try
             {
-                try
+                using (var testFont = new Font(fontName, size))
                 {
-                    return new Font(fontFamilyName, size, style);
+                    return new Font(fontName, size, style);
                 }
-                catch { }
             }
-            return new Font("微软雅黑", size, style);
+            catch
+            {
+                return new Font("微软雅黑", size, style);
+            }
         }
 
-        public static Font GetCustomFont(float size, FontStyle style = FontStyle.Regular)
+        public static string[] GetInstalledFonts()
         {
-            if (_customLoaded && _privateFonts.Families.Length > 0)
+            using (var fonts = new InstalledFontCollection())
             {
-                return new Font(_privateFonts.Families[0], size, style);
+                var families = fonts.Families;
+                string[] fontNames = new string[families.Length];
+                for (int i = 0; i < families.Length; i++)
+                    fontNames[i] = families[i].Name;
+                Array.Sort(fontNames);
+                return fontNames;
             }
-            return GetFont("微软雅黑", size, style);
         }
     }
 }

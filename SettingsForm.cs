@@ -59,16 +59,19 @@ namespace HomeworkViewer
         private Panel pnlBarColorPreview;
         private ColorDialog colorDialog;
         private ComboBox cmbBgEffect;
-        private ComboBox cmbFontFamily;
-        private Button btnSelectCustomFont;
         private CheckBox chkShowMouseGlow;
+        private CheckBox chkApplyBarColorToCardBorder;
 
         // 背景图片相关
         private RadioButton rbTransparentBg;
         private RadioButton rbImageBg;
         private TextBox txtBgImagePath;
         private Button btnBrowseBgImage;
-        private ComboBox cmbImageFillMode; // 填充方式下拉框
+        private ComboBox cmbImageFillMode;
+
+        // 统一自定义字体
+        private CheckBox chkUseCustomFont;
+        private ComboBox cmbCustomFont;
 
         // 时间段
         private NumericUpDown numEveningCount;
@@ -108,17 +111,13 @@ namespace HomeworkViewer
         private MirrorManager _mirrorManager;
         private DownloadHelper _downloadHelper;
 
-        private Bitmap _cachedBackground;        // 缓存的背景图（已缩放到虚拟尺寸）
-        private TextureBrush _tileBrush;         // 平铺模式用的笔刷
-        private ImageFillMode _cachedBackgroundMode; // 记录上次的填充模式，用于判断是否需要重新生成
-
         public SettingsForm(HomeworkViewer main)
         {
             mainForm = main;
             config = AppConfig.Load();
             _mirrorManager = new MirrorManager();
             _downloadHelper = new DownloadHelper();
-            _downloadHelper.UseMirror = true;  // 强制启用镜像下载
+            _downloadHelper.UseMirror = true;
 
             InitializeComponent();
             LoadSettings();
@@ -909,7 +908,7 @@ namespace HomeworkViewer
         }
         private void ShowBasicPage() => contentPanel.Controls.Add(basicPanel);
 
-        // ---------- 外观设置（包含背景图片填充方式） ----------
+        // ---------- 外观设置（统一自定义字体） ----------
         private Panel appearancePanel;
         private void CreateAppearancePage()
         {
@@ -918,14 +917,14 @@ namespace HomeworkViewer
             {
                 Dock = DockStyle.Top,
                 ColumnCount = 2,
-                RowCount = 23,
+                RowCount = 28,
                 Padding = new Padding(20),
                 AutoSize = true,
                 BackColor = Color.Transparent
             };
             layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 140));
             layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-            for (int i = 0; i < 23; i++)
+            for (int i = 0; i < 28; i++)
                 layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
 
             // 卡片样式
@@ -938,7 +937,6 @@ namespace HomeworkViewer
             cardPanel.Controls.Add(trackCardOpacity);
             cardPanel.Controls.Add(numCardOpacity);
             AddSettingRow(layout, "卡片透明度:", cardPanel, 1);
-
             AddSeparator(layout, 2);
 
             // 字体颜色
@@ -949,19 +947,42 @@ namespace HomeworkViewer
             colorPanel.Controls.Add(rbBlack);
             colorPanel.Controls.Add(rbWhite);
             AddSettingRow(layout, "颜色:", colorPanel, 4);
-
             AddSeparator(layout, 5);
 
-            // 顶部条颜色
+            // 顶部条颜色 + 应用到卡片背景
             AddSectionHeader(layout, "顶部条颜色", 6);
-            FlowLayoutPanel barColorPanel = new FlowLayoutPanel { FlowDirection = FlowDirection.LeftToRight, AutoSize = true, BackColor = Color.Transparent };
+            Label lblColor = new Label
+            {
+                Text = "颜色:",
+                TextAlign = ContentAlignment.MiddleRight,
+                ForeColor = Color.White,
+                BackColor = Color.Transparent,
+                AutoSize = true,
+                Margin = new Padding(0, 5, 10, 5)
+            };
+            FlowLayoutPanel colorWithCheckPanel = new FlowLayoutPanel
+            {
+                FlowDirection = FlowDirection.LeftToRight,
+                AutoSize = true,
+                BackColor = Color.Transparent
+            };
             btnBarColor = new Button { Text = "选择颜色", Width = 80, Height = 25, BackColor = Color.FromArgb(64, 64, 64), ForeColor = Color.White, FlatStyle = FlatStyle.Flat };
             btnBarColor.Click += BtnBarColor_Click;
             pnlBarColorPreview = new Panel { Width = 40, Height = 25, BackColor = Color.Yellow, BorderStyle = BorderStyle.FixedSingle };
-            barColorPanel.Controls.Add(btnBarColor);
-            barColorPanel.Controls.Add(pnlBarColorPreview);
-            AddSettingRow(layout, "颜色:", barColorPanel, 7);
-
+            colorWithCheckPanel.Controls.Add(btnBarColor);
+            colorWithCheckPanel.Controls.Add(pnlBarColorPreview);
+            chkApplyBarColorToCardBorder = new CheckBox
+            {
+                Text = "应用到卡片",
+                Checked = config.ApplyBarColorToCardBorder,
+                AutoSize = true,
+                ForeColor = Color.White,
+                BackColor = Color.Transparent,
+                Margin = new Padding(10, 0, 0, 0)
+            };
+            colorWithCheckPanel.Controls.Add(chkApplyBarColorToCardBorder);
+            layout.Controls.Add(lblColor, 0, 7);
+            layout.Controls.Add(colorWithCheckPanel, 1, 7);
             AddSeparator(layout, 8);
 
             // 背景效果
@@ -970,38 +991,36 @@ namespace HomeworkViewer
             cmbBgEffect.Items.AddRange(new object[] { "Mica", "Acrylic", "Aero" });
             cmbBgEffect.SelectedItem = config.BackgroundEffect;
             AddSettingRow(layout, "效果:", cmbBgEffect, 10);
-
             AddSeparator(layout, 11);
 
-            // 字体选择
-            AddSectionHeader(layout, "字体", 12);
-            cmbFontFamily = CreateComboBox(150);
-            cmbFontFamily.Items.AddRange(new object[] { "微软雅黑", "黑体", "楷体", "苹方", "自定义" });
-            cmbFontFamily.SelectedItem = config.IsCustomFont ? "自定义" : config.FontFamily;
-            btnSelectCustomFont = new Button
+            // ========== 统一自定义字体 ==========
+            AddSectionHeader(layout, "自定义字体", 12);
+            chkUseCustomFont = new CheckBox
             {
-                Text = "选择字体文件",
-                Width = 100,
-                Height = 25,
-                Visible = false,
-                BackColor = Color.FromArgb(64, 64, 64),
-                ForeColor = Color.White,
-                FlatStyle = FlatStyle.Flat
+                Text = "启用自定义字体",
+                Checked = config.UseCustomFont,
+                AutoSize = true,
+                ForeColor = Color.White
             };
-            btnSelectCustomFont.Click += BtnSelectCustomFont_Click;
-            cmbFontFamily.SelectedIndexChanged += (s, e) =>
-            {
-                btnSelectCustomFont.Visible = cmbFontFamily.SelectedItem?.ToString() == "自定义";
-            };
-            FlowLayoutPanel fontPanel = new FlowLayoutPanel { FlowDirection = FlowDirection.LeftToRight, AutoSize = true, BackColor = Color.Transparent };
-            fontPanel.Controls.Add(cmbFontFamily);
-            fontPanel.Controls.Add(btnSelectCustomFont);
-            AddSettingRow(layout, "选择:", fontPanel, 13);
+            AddSettingRow(layout, "", chkUseCustomFont, 13);
 
-            AddSeparator(layout, 14);
+            string[] installedFonts = FontManager.GetInstalledFonts();
+            cmbCustomFont = CreateComboBox(200);
+            cmbCustomFont.Items.AddRange(installedFonts);
+            cmbCustomFont.SelectedItem = config.CustomFontName;
+            cmbCustomFont.DropDownStyle = ComboBoxStyle.DropDownList;
+            AddSettingRow(layout, "选择字体:", cmbCustomFont, 14);
+
+            chkUseCustomFont.CheckedChanged += (s, e) =>
+            {
+                cmbCustomFont.Enabled = chkUseCustomFont.Checked;
+            };
+            cmbCustomFont.Enabled = chkUseCustomFont.Checked;
+
+            AddSeparator(layout, 15);
 
             // 鼠标效果
-            AddSectionHeader(layout, "鼠标效果", 15);
+            AddSectionHeader(layout, "鼠标效果", 16);
             chkShowMouseGlow = new CheckBox
             {
                 Text = "显示鼠标跟随光晕",
@@ -1010,20 +1029,18 @@ namespace HomeworkViewer
                 ForeColor = Color.White,
                 BackColor = Color.Transparent
             };
-            AddSettingRow(layout, "光晕:", chkShowMouseGlow, 16);
-
-            AddSeparator(layout, 17);
+            AddSettingRow(layout, "光晕:", chkShowMouseGlow, 17);
+            AddSeparator(layout, 18);
 
             // 背景图片
-            AddSectionHeader(layout, "背景图片", 18);
+            AddSectionHeader(layout, "背景图片", 19);
             FlowLayoutPanel bgTypePanel = new FlowLayoutPanel { FlowDirection = FlowDirection.LeftToRight, AutoSize = true, BackColor = Color.Transparent };
             rbTransparentBg = new RadioButton { Text = "透明背景", Checked = !config.UseBackgroundImage, AutoSize = true, ForeColor = Color.White };
             rbImageBg = new RadioButton { Text = "图片背景", Checked = config.UseBackgroundImage, AutoSize = true, ForeColor = Color.White };
             bgTypePanel.Controls.Add(rbTransparentBg);
             bgTypePanel.Controls.Add(rbImageBg);
-            AddSettingRow(layout, "类型:", bgTypePanel, 19);
+            AddSettingRow(layout, "类型:", bgTypePanel, 20);
 
-            // 图片路径
             FlowLayoutPanel imagePathPanel = new FlowLayoutPanel { FlowDirection = FlowDirection.LeftToRight, AutoSize = true, BackColor = Color.Transparent };
             txtBgImagePath = new TextBox { Width = 200, BackColor = Color.FromArgb(64, 64, 64), ForeColor = Color.White, BorderStyle = BorderStyle.FixedSingle };
             btnBrowseBgImage = new Button { Text = "浏览", Width = 60, Height = 23, BackColor = Color.FromArgb(64, 64, 64), ForeColor = Color.White, FlatStyle = FlatStyle.Flat };
@@ -1039,16 +1056,14 @@ namespace HomeworkViewer
             imagePathPanel.Controls.Add(txtBgImagePath);
             imagePathPanel.Controls.Add(btnBrowseBgImage);
             Label lblBgImage = new Label { Text = "图片路径:", TextAlign = ContentAlignment.MiddleRight, ForeColor = Color.White, BackColor = Color.Transparent, AutoSize = true };
-            layout.Controls.Add(lblBgImage, 0, 20);
-            layout.Controls.Add(imagePathPanel, 1, 20);
+            layout.Controls.Add(lblBgImage, 0, 21);
+            layout.Controls.Add(imagePathPanel, 1, 21);
 
-            // 填充方式
             cmbImageFillMode = CreateComboBox(120);
             cmbImageFillMode.Items.AddRange(new object[] { "填充", "适应", "覆盖", "拉伸", "平铺", "居中" });
             cmbImageFillMode.SelectedIndex = (int)config.BackgroundImageMode;
-            AddSettingRow(layout, "填充方式:", cmbImageFillMode, 21);
+            AddSettingRow(layout, "填充方式:", cmbImageFillMode, 22);
 
-            // 控制可见性：仅当使用图片背景时显示路径和填充方式
             Action updateVisibility = () =>
             {
                 bool useImage = rbImageBg.Checked;
@@ -1061,7 +1076,7 @@ namespace HomeworkViewer
             rbImageBg.CheckedChanged += (s, e) => updateVisibility();
             updateVisibility();
 
-            layout.RowCount = 22;
+            layout.RowCount = 23;
             appearancePanel.Controls.Add(layout);
         }
         private void ShowAppearancePage() => contentPanel.Controls.Add(appearancePanel);
@@ -1332,7 +1347,7 @@ namespace HomeworkViewer
             for (int i = 0; i < 11; i++)
                 layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
 
-            Label lblVersion = new Label { Text = "作业展板 版本 2.2.0", Font = new Font("微软雅黑", 12, FontStyle.Bold), AutoSize = true, ForeColor = Color.White };
+            Label lblVersion = new Label { Text = "作业展板 版本 2.3.0", Font = new Font("微软雅黑", 12, FontStyle.Bold), AutoSize = true, ForeColor = Color.White };
             layout.Controls.Add(lblVersion, 0, 0);
             Label lblAuthor = new Label { Text = "作者: MaxSui 隋修梁", AutoSize = true, ForeColor = Color.White, Font = new Font("微软雅黑", 10) };
             layout.Controls.Add(lblAuthor, 0, 1);
@@ -1457,7 +1472,6 @@ namespace HomeworkViewer
             if (config.FontColorWhite) rbWhite.Checked = true; else rbBlack.Checked = true;
             pnlBarColorPreview.BackColor = ParseColor(config.BarColor, Color.Yellow);
             cmbDefaultExportFormat.SelectedItem = config.ExportFormat;
-            cmbFontFamily.SelectedItem = config.IsCustomFont ? "自定义" : config.FontFamily;
             chkShowMouseGlow.Checked = config.ShowMouseGlow;
             chkShowDueTime.Checked = config.ShowDueTime;
             chkMgmtEnabled.Checked = config.MgmtEnabled;
@@ -1467,6 +1481,11 @@ namespace HomeworkViewer
             rbImageBg.Checked = config.UseBackgroundImage;
             txtBgImagePath.Text = config.BackgroundImagePath;
             cmbImageFillMode.SelectedIndex = (int)config.BackgroundImageMode;
+            chkApplyBarColorToCardBorder.Checked = config.ApplyBarColorToCardBorder;
+
+            // 加载自定义字体
+            chkUseCustomFont.Checked = config.UseCustomFont;
+            cmbCustomFont.SelectedItem = config.CustomFontName;
         }
 
         private void BtnOK_Click(object sender, EventArgs e)
@@ -1480,17 +1499,6 @@ namespace HomeworkViewer
             config.ExportFormat = cmbDefaultExportFormat.SelectedItem?.ToString() ?? "txt";
             config.ShowMouseGlow = chkShowMouseGlow.Checked;
             config.ShowDueTime = chkShowDueTime.Checked;
-
-            string fontSelection = cmbFontFamily.SelectedItem?.ToString();
-            if (fontSelection == "自定义")
-            {
-                config.IsCustomFont = true;
-            }
-            else
-            {
-                config.IsCustomFont = false;
-                config.FontFamily = fontSelection;
-            }
 
             config.MgmtEnabled = chkMgmtEnabled.Checked;
             config.MgmtManifestUrl = txtMgmtManifestUrl.Text.Trim();
@@ -1509,36 +1517,17 @@ namespace HomeworkViewer
             config.BackgroundImagePath = bgPath;
             config.BackgroundImageMode = (ImageFillMode)cmbImageFillMode.SelectedIndex;
 
+            config.ApplyBarColorToCardBorder = chkApplyBarColorToCardBorder.Checked;
+
+            // 保存自定义字体
+            config.UseCustomFont = chkUseCustomFont.Checked;
+            config.CustomFontName = cmbCustomFont.SelectedItem?.ToString() ?? "微软雅黑";
+
             config.Save();
 
             mainForm.ApplySettings(config);
             this.DialogResult = DialogResult.OK;
             this.Close();
-        }
-
-        private void BtnSelectCustomFont_Click(object sender, EventArgs e)
-        {
-            using (OpenFileDialog ofd = new OpenFileDialog())
-            {
-                ofd.Filter = "字体文件|*.ttf;*.ttc";
-                ofd.Title = "选择自定义字体文件";
-                if (ofd.ShowDialog() == DialogResult.OK)
-                {
-                    string destPath = Path.Combine(Application.StartupPath, "selfdeffont" + Path.GetExtension(ofd.FileName));
-                    try
-                    {
-                        File.Copy(ofd.FileName, destPath, true);
-                        config.FontFamily = destPath;
-                        config.IsCustomFont = true;
-                        FontManager.LoadCustomFont(destPath);
-                        MessageBox.Show("自定义字体已加载，重启应用后生效。", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                    }
-                    catch (Exception ex)
-                    {
-                        MessageBox.Show($"字体复制失败：{ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                    }
-                }
-            }
         }
 
         private void BtnBarColor_Click(object sender, EventArgs e)
